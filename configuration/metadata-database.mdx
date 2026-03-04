@@ -1,0 +1,304 @@
+---
+title: Metadata Database
+description: Configure PostgreSQL for Amp's metadata storage
+---
+
+## Overview
+
+Amp uses PostgreSQL to store metadata about datasets, jobs, workers, files, and extraction progress. The metadata database enables coordination across distributed components and provides transactional consistency for dataset operations.
+
+## Configuration
+
+The metadata database is configured in the `[metadata_db]` section of the config file:
+
+```toml
+[metadata_db]
+url = "postgres://user:password@localhost:5432/amp_metadata"
+pool_size = 10
+auto_migrate = true
+```
+
+### Configuration Fields
+
+<ParamField path="metadata_db.url" type="string" required>
+  PostgreSQL connection URL. **Required** for all commands (`server`, `worker`, `controller`, `migrate`).
+  
+  Solo mode automatically provides a managed PostgreSQL URL by default. You can optionally provide your own database URL to use an external database instead.
+  
+  ```toml
+  [metadata_db]
+  url = "postgres://username:password@hostname:5432/database_name"
+  ```
+  
+  Environment variable override:
+  ```bash
+  export AMP_CONFIG_METADATA_DB__URL="postgresql://user:pass@host/db"
+  ```
+</ParamField>
+
+<ParamField path="metadata_db.pool_size" type="integer" default="10">
+  Size of the database connection pool. Controls how many concurrent connections Amp maintains to PostgreSQL.
+  
+  ```toml
+  [metadata_db]
+  pool_size = 20  # Increase for high-concurrency workloads
+  ```
+</ParamField>
+
+<ParamField path="metadata_db.auto_migrate" type="boolean" default="true">
+  Automatically run database migrations on startup. When enabled, Amp will apply any pending schema migrations before starting services.
+  
+  Set to `false` if you want to run migrations manually using `ampd migrate`.
+  
+  ```toml
+  [metadata_db]
+  auto_migrate = false  # Disable auto-migration
+  ```
+</ParamField>
+
+## Connection String Format
+
+PostgreSQL connection strings follow the standard format:
+
+```
+postgresql://[user[:password]@][host][:port][/dbname][?param1=value1&...]
+```
+
+### Examples
+
+```bash
+# Basic connection
+postgresql://localhost/amp_metadata
+
+# With authentication
+postgresql://amp_user:secret_password@localhost:5432/amp_metadata
+
+# Remote database
+postgresql://user:pass@db.example.com:5432/amp_metadata
+
+# With SSL
+postgresql://user:pass@host/db?sslmode=require
+
+# Unix socket
+postgresql:///amp_metadata?host=/var/run/postgresql
+```
+
+### Connection Parameters
+
+Common query parameters for the connection URL:
+
+- `sslmode`: SSL/TLS mode (`disable`, `require`, `verify-ca`, `verify-full`)
+- `connect_timeout`: Connection timeout in seconds
+- `application_name`: Application name shown in PostgreSQL logs
+- `host`: Unix socket directory path
+
+## Solo Mode Auto-Managed PostgreSQL
+
+`ampd solo` automatically manages a local PostgreSQL instance with zero configuration:
+
+- Uses system-installed PostgreSQL binaries (`initdb`, `postgres`)
+- Initializes database cluster at `.amp/metadb/` on first run
+- Connects via Unix socket (no TCP port conflicts)
+- Data persists across restarts
+- Shuts down gracefully with Ctrl+C or SIGTERM
+
+### Using External Database in Solo Mode
+
+To use an external database instead of the auto-managed instance:
+
+```bash
+# Via environment variable
+export AMP_CONFIG_METADATA_DB__URL="postgresql://user:pass@host/db"
+ampd solo
+
+# Or in config file
+[metadata_db]
+url = "postgresql://user:pass@remote-host/amp_metadata"
+```
+
+When an external database URL is detected, managed PostgreSQL startup is skipped entirely.
+
+## Database Setup
+
+### 1. Create Database
+
+Create a dedicated database for Amp metadata:
+
+```sql
+CREATE DATABASE amp_metadata;
+CREATE USER amp_user WITH PASSWORD 'secure_password';
+GRANT ALL PRIVILEGES ON DATABASE amp_metadata TO amp_user;
+```
+
+### 2. Run Migrations
+
+Migrations can be applied automatically or manually:
+
+**Automatic (default)**:
+
+```toml
+[metadata_db]
+url = "postgresql://amp_user:password@localhost/amp_metadata"
+auto_migrate = true  # Migrations run on startup
+```
+
+**Manual**:
+
+```bash
+# Run migrations explicitly
+ampd migrate --config /path/to/config.toml
+
+# Or with environment variable
+export AMP_CONFIG_METADATA_DB__URL="postgresql://..."
+ampd migrate
+```
+
+### 3. Verify Connection
+
+Test the database connection:
+
+```bash
+# Using psql
+psql "postgresql://amp_user:password@localhost/amp_metadata"
+
+# Check migrations table
+SELECT * FROM _amp_migrations ORDER BY id;
+```
+
+## Database Migrations
+
+Amp uses SQL migrations to manage the metadata database schema. Migrations are:
+
+- **Sequential**: Applied in order by ID
+- **Idempotent**: Safe to run multiple times
+- **Tracked**: Status stored in `_amp_migrations` table
+- **Versioned**: Each Amp version includes required migrations
+
+### Running Migrations
+
+The `migrate` command applies pending migrations:
+
+```bash
+ampd migrate --config /path/to/config.toml
+```
+
+**What happens:**
+
+1. Connects to PostgreSQL metadata database
+2. Checks which migrations have been applied
+3. Runs all unapplied migrations in order
+4. Updates `_amp_migrations` tracking table
+5. Exits with success or error status
+
+### Migration Safety
+
+<Warning>
+Always backup your metadata database before running migrations, especially in production.
+</Warning>
+
+**Best practices:**
+
+- **Backup first**: Take a full database backup before upgrading
+- **Test migrations**: Run migrations in a staging environment first
+- **Check release notes**: Review migration notes in release documentation
+- **Monitor logs**: Watch for errors during migration
+- **Verify completion**: Check migration status after running
+
+### Troubleshooting Migrations
+
+**Permission errors**: Ensure database user has `CREATE`, `ALTER`, and `DROP` privileges:
+
+```sql
+GRANT CREATE, ALTER, DROP ON DATABASE amp_metadata TO amp_user;
+```
+
+**Failed migrations**: Check migration status:
+
+```sql
+SELECT * FROM _amp_migrations ORDER BY id;
+```
+
+If a migration fails partway through, manual intervention may be required. Review the error logs and fix the database state before retrying.
+
+**Rolling back**: To roll back, restore the database from a backup taken before migration. Amp does not support automatic rollback.
+
+## Database Maintenance
+
+### Connection Pooling
+
+Adjust `pool_size` based on your workload:
+
+```toml
+[metadata_db]
+# For solo mode or low concurrency
+pool_size = 5
+
+# For distributed mode with multiple workers
+pool_size = 20
+```
+
+### Monitoring
+
+Monitor PostgreSQL performance:
+
+```sql
+-- Active connections
+SELECT count(*) FROM pg_stat_activity WHERE datname = 'amp_metadata';
+
+-- Database size
+SELECT pg_size_pretty(pg_database_size('amp_metadata'));
+
+-- Table sizes
+SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+### Vacuum and Analyze
+
+PostgreSQL requires periodic maintenance:
+
+```sql
+-- Manual vacuum and analyze
+VACUUM ANALYZE;
+
+-- Enable autovacuum (recommended)
+ALTER DATABASE amp_metadata SET autovacuum = on;
+```
+
+## High Availability
+
+For production deployments, consider:
+
+- **Replication**: PostgreSQL streaming replication for read replicas
+- **Failover**: Automatic failover with tools like Patroni or pg_auto_failover
+- **Backups**: Regular backups with pg_dump or continuous archiving
+- **Monitoring**: Track connection pool usage, query performance, and disk space
+
+## Security
+
+<Warning>
+Never expose PostgreSQL directly to the internet. Use firewalls, VPCs, and SSL/TLS for remote connections.
+</Warning>
+
+**Security checklist:**
+
+- Use strong passwords for database users
+- Enable SSL/TLS for remote connections (`sslmode=require`)
+- Restrict network access with firewalls or VPCs
+- Use dedicated database users with minimal privileges
+- Store connection strings in environment variables, not in code
+- Rotate credentials periodically
+- Enable PostgreSQL audit logging for compliance
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Storage Configuration" icon="cloud" href="/configuration/storage">
+    Configure object storage backends
+  </Card>
+  <Card title="Telemetry" icon="chart-line" href="/configuration/telemetry">
+    Set up metrics and traces
+  </Card>
+</CardGroup>

@@ -1,0 +1,382 @@
+---
+title: Monitoring & Observability
+description: Track metrics, health, and performance across Amp infrastructure
+---
+
+Amp provides comprehensive monitoring and observability capabilities for tracking system health, performance metrics, and operational status. Operators can monitor job progress, worker health, and integrate with external observability platforms.
+
+## Key Monitoring Areas
+
+<CardGroup cols={2}>
+  <Card title="Job Progress" icon="chart-line">
+    Track data sync state and block numbers
+  </Card>
+  <Card title="Worker Health" icon="heart-pulse">
+    Monitor worker heartbeats and availability
+  </Card>
+  <Card title="System Metrics" icon="gauge">
+    Collect operational metrics and statistics
+  </Card>
+  <Card title="Health Checks" icon="check">
+    Verify component availability
+  </Card>
+</CardGroup>
+
+## Job Progress Monitoring
+
+Track the sync state of extraction jobs in real-time:
+
+### Get Job Progress
+
+<CodeGroup>
+```bash CLI
+# Monitor job progress
+ampctl job progress 123
+
+# JSON output for automation
+ampctl job progress 123 --json
+
+# Watch progress continuously
+watch -n 5 'ampctl job progress 123'
+```
+
+```bash API
+# Get progress via API
+curl http://localhost:1610/jobs/123/progress
+
+# Extract current block with jq
+curl http://localhost:1610/jobs/123/progress | jq '.tables["blocks"].current_block'
+```
+</CodeGroup>
+
+**Progress Response:**
+```json
+{
+  "job_id": 123,
+  "job_status": "RUNNING",
+  "tables": {
+    "blocks": {
+      "current_block": 21500000,
+      "start_block": 0,
+      "files_count": 1247,
+      "total_size_bytes": 137970286592
+    },
+    "transactions": {
+      "current_block": 21499850,
+      "start_block": 0,
+      "files_count": 3891,
+      "total_size_bytes": 549957091328
+    }
+  }
+}
+```
+
+**Key Metrics:**
+- `current_block` - Highest block in contiguous synced range
+- `start_block` - Lowest block in synced range  
+- `files_count` - Number of Parquet files written
+- `total_size_bytes` - Total data size in bytes
+
+### Progress Monitoring Scripts
+
+```bash
+# Monitor sync progress for all active jobs
+ampctl job list --status active --json | jq -r '.jobs[].id' | while read job_id; do
+  echo "Job $job_id:"
+  ampctl job progress "$job_id" --json | jq -r '.tables | to_entries[] | 
+    "  \(.key): block \(.value.current_block) (\(.value.files_count) files)"'
+  echo
+done
+```
+
+```bash
+# Alert if job falls behind
+#!/bin/bash
+TARGET_BLOCK=21500000
+THRESHOLD=1000
+
+for job_id in $(ampctl job list --status running --json | jq -r '.jobs[].id'); do
+  current=$(ampctl job progress "$job_id" --json | jq -r '.tables.blocks.current_block')
+  lag=$((TARGET_BLOCK - current))
+  
+  if [ $lag -gt $THRESHOLD ]; then
+    echo "ALERT: Job $job_id is $lag blocks behind (current: $current)"
+  fi
+done
+```
+
+## Worker Health Monitoring
+
+Monitor worker availability and heartbeat status:
+
+### Check Worker Health
+
+<CodeGroup>
+```bash CLI
+# List all workers with heartbeats
+ampctl worker list
+
+# JSON for automation
+ampctl worker list --json
+
+# Watch worker status
+watch -n 5 'ampctl worker list'
+```
+
+```bash API
+# List workers via API
+curl http://localhost:1610/workers
+
+# Get specific worker details
+curl http://localhost:1610/workers/worker-01
+```
+</CodeGroup>
+
+### Worker Health Scripts
+
+```bash
+# Find inactive workers (heartbeat > 30s old)
+ampctl worker list --json | jq -r '.workers[] |
+  select((.heartbeat_at | fromdateiso8601) < (now - 30)) |
+  "⚠ Inactive: \(.node_id) (last seen: \(.heartbeat_at))"'
+```
+
+```bash
+# Health check script for monitoring
+#!/bin/bash
+THRESHOLD=30
+EXIT_CODE=0
+
+while IFS= read -r worker; do
+  node_id=$(echo "$worker" | jq -r '.node_id')
+  heartbeat=$(echo "$worker" | jq -r '.heartbeat_at')
+  age=$(( $(date +%s) - $(date -d "$heartbeat" +%s 2>/dev/null || echo 0) ))
+  
+  if [ $age -gt $THRESHOLD ]; then
+    echo "❌ $node_id: heartbeat $age seconds old"
+    EXIT_CODE=1
+  else
+    echo "✓ $node_id: healthy"
+  fi
+done < <(ampctl worker list --json | jq -c '.workers[]')
+
+exit $EXIT_CODE
+```
+
+### Track Worker Count
+
+```bash
+# Monitor worker fleet size over time
+while true; do
+  count=$(ampctl worker list --json | jq '.workers | length')
+  timestamp=$(date -Iseconds)
+  echo "$timestamp: $count workers active"
+  sleep 60
+done
+```
+
+## System Metrics
+
+### Job Metrics
+
+```bash
+# Count jobs by status
+ampctl job list --status all --json | jq -r '
+  .jobs | group_by(.status) | 
+  map({status: .[0].status, count: length}) | 
+  .[] | "\(.status): \(.count)"'
+```
+
+```bash
+# Track job creation rate
+#!/bin/bash
+while true; do
+  total=$(ampctl job list --json | jq '.jobs | length')
+  timestamp=$(date -Iseconds)
+  echo "$timestamp: $total total jobs"
+  sleep 300  # Every 5 minutes
+done
+```
+
+### Dataset Metrics
+
+```bash
+# Count registered datasets
+ampctl dataset list --json | jq '.datasets | length'
+
+# List datasets by namespace
+ampctl dataset list --json | jq -r '
+  .datasets | group_by(.namespace) |
+  map({namespace: .[0].namespace, count: length}) |
+  .[] | "\(.namespace): \(.count) datasets"'
+```
+
+## Health Checks
+
+Verify system component availability:
+
+### API Health Check
+
+```bash
+# Check Admin API availability
+curl -f http://localhost:1610/workers > /dev/null && \
+  echo "✓ Admin API is healthy" || \
+  echo "❌ Admin API is down"
+```
+
+### Component Health Script
+
+```bash
+#!/bin/bash
+# health-check.sh - Verify all components
+
+ERROR=0
+
+# Check Admin API
+if curl -sf http://localhost:1610/workers > /dev/null; then
+  echo "✓ Admin API: healthy"
+else
+  echo "❌ Admin API: unreachable"
+  ERROR=1
+fi
+
+# Check worker count
+WORKER_COUNT=$(ampctl worker list --json 2>/dev/null | jq '.workers | length')
+if [ "$WORKER_COUNT" -gt 0 ]; then
+  echo "✓ Workers: $WORKER_COUNT active"
+else
+  echo "❌ Workers: none active"
+  ERROR=1
+fi
+
+# Check active jobs
+JOB_COUNT=$(ampctl job list --status active --json 2>/dev/null | jq '.jobs | length')
+echo "ℹ Active jobs: $JOB_COUNT"
+
+exit $ERROR
+```
+
+## OpenTelemetry Integration
+
+Amp supports OpenTelemetry for exporting metrics to observability platforms:
+
+### Configuration
+
+<Note>
+OpenTelemetry configuration details depend on your deployment setup. Consult the Amp deployment documentation for OTLP endpoint configuration.
+</Note>
+
+**Exportable Metrics:**
+- Job execution metrics (duration, status, errors)
+- Worker heartbeat metrics (uptime, availability)
+- Data sync metrics (blocks processed, throughput)
+- API request metrics (latency, status codes)
+
+### Common Integration Targets
+
+<CardGroup cols={2}>
+  <Card title="Prometheus" icon="chart-line">
+    Metrics collection and alerting
+  </Card>
+  <Card title="Grafana" icon="chart-area">
+    Visualization and dashboards
+  </Card>
+  <Card title="Datadog" icon="database">
+    Full-stack observability
+  </Card>
+  <Card title="New Relic" icon="chart-pie">
+    APM and monitoring
+  </Card>
+</CardGroup>
+
+## Monitoring Best Practices
+
+### Essential Alerts
+
+Set up alerts for critical conditions:
+
+1. **Worker Health**
+   - Alert when worker heartbeat > 60 seconds old
+   - Alert when worker count drops below threshold
+   - Alert on version mismatches across fleet
+
+2. **Job Health**
+   - Alert on job failures
+   - Alert when jobs fall behind target block
+   - Alert on jobs stuck in same state > 1 hour
+
+3. **System Health**
+   - Alert on API unavailability
+   - Alert on database connection failures
+   - Alert on storage issues
+
+### Metrics to Track
+
+**Operational Metrics:**
+- Active worker count
+- Running job count  
+- Average sync lag (target block - current block)
+- Job failure rate
+- Data ingestion rate (blocks/sec, bytes/sec)
+
+**Resource Metrics:**
+- Storage utilization (files, bytes)
+- Database connection pool usage
+- API request rate and latency
+
+### Dashboard Examples
+
+**Job Progress Dashboard:**
+```bash
+# Display job progress summary
+echo "=== Job Progress Summary ==="
+for job_id in $(ampctl job list --status running --json | jq -r '.jobs[].id'); do
+  info=$(ampctl job progress "$job_id" --json)
+  job_id_str=$(echo "$info" | jq -r '.job_id')
+  status=$(echo "$info" | jq -r '.job_status')
+  blocks=$(echo "$info" | jq -r '.tables.blocks.current_block // "N/A"')
+  files=$(echo "$info" | jq -r '.tables.blocks.files_count // "0"')
+  echo "Job $job_id_str [$status]: Block $blocks ($files files)"
+done
+```
+
+**Worker Fleet Status:**
+```bash
+# Display worker fleet summary  
+echo "=== Worker Fleet Status ==="
+total=$(ampctl worker list --json | jq '.workers | length')
+active=$(ampctl worker list --json | jq -r '.workers[] | 
+  select((.heartbeat_at | fromdateiso8601) > (now - 30))' | jq -s 'length')
+echo "Total: $total workers"
+echo "Active: $active workers (heartbeat < 30s)"
+echo "Inactive: $((total - active)) workers"
+```
+
+## Logging
+
+Amp components produce structured logs for troubleshooting:
+
+**Key Log Sources:**
+- `ampd controller` - Admin API requests, job scheduling
+- `ampd worker` - Job execution, data extraction
+- Worker heartbeats - Health signals, registration events
+
+**Log Levels:**
+- `ERROR` - Failures requiring attention
+- `WARN` - Potential issues to investigate  
+- `INFO` - Normal operational events
+- `DEBUG` - Detailed troubleshooting information
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Job Management" icon="play" href="/admin/jobs">
+    Learn job progress tracking
+  </Card>
+  <Card title="Worker Management" icon="server" href="/admin/workers">
+    Monitor worker health
+  </Card>
+  <Card title="Dataset Management" icon="database" href="/admin/datasets">
+    Track dataset deployments
+  </Card>
+</CardGroup>

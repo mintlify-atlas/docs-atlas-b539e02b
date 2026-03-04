@@ -1,0 +1,368 @@
+---
+title: Firehose Provider
+description: Configure StreamingFast Firehose for high-throughput blockchain data streaming
+---
+
+The Firehose provider enables high-throughput blockchain data extraction via StreamingFast's Firehose protocol. It uses gRPC streaming for efficient, continuous data delivery with full transaction traces and call data.
+
+## Overview
+
+Firehose is StreamingFast's high-performance blockchain streaming protocol that provides:
+
+- **Real-time streaming**: Continuous block delivery via gRPC
+- **Full transaction traces**: Complete call trees and internal transactions
+- **High throughput**: Optimized for large-scale data extraction
+- **Protocol buffers**: Efficient binary serialization
+
+### Extracted Tables
+
+Firehose extracts data into four tables:
+
+- **blocks**: Block headers and metadata
+- **transactions**: Transaction data and execution results
+- **calls**: Internal call traces (function calls, contract creations, self-destructs)
+- **logs**: Event logs emitted by smart contracts
+
+<Note>
+Firehose provides **calls** table data that is not available through standard JSON-RPC endpoints.
+</Note>
+
+## Configuration
+
+### Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Must be `"firehose"` |
+| `network` | string | Network identifier (e.g., `mainnet`, `base`, `polygon`) |
+| `url` | string | Firehose gRPC endpoint URL |
+
+### Optional Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `token` | string | none | Bearer token for authentication |
+
+### Minimal Configuration
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "${FIREHOSE_ETH_MAINNET_URL}"
+```
+
+### With Authentication
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "${FIREHOSE_ETH_MAINNET_URL}"
+token = "${FIREHOSE_ETH_MAINNET_TOKEN}"
+```
+
+<Warning>
+Always use environment variables for Firehose tokens to prevent credential leakage.
+</Warning>
+
+## How It Works
+
+### gRPC Streaming
+
+Firehose uses server-side gRPC streaming for continuous data delivery:
+
+```
+Dataset Job → Provider Resolution → Firehose Client → gRPC Stream → Firehose Endpoint
+                                            ↓
+                                    TLS + Compression
+                                            ↓
+                                    Block Stream (with traces)
+                                            ↓
+                        Parquet Tables (blocks, txs, calls, logs)
+```
+
+### Connection Features
+
+| Feature | Description |
+|---------|-------------|
+| **Gzip Compression** | Both send and receive compressed for bandwidth efficiency |
+| **Large Messages** | Up to 100 MiB message size for complex blocks with many calls |
+| **Auto Retry** | 5-second backoff on stream errors for resilience |
+| **TLS** | Native TLS with system root certificates |
+
+### Data Flow
+
+1. Dataset job requests block range from manifest
+2. Provider resolution finds matching `firehose` provider for network
+3. Client establishes gRPC stream with authentication (if configured)
+4. Firehose streams blocks with full transaction traces
+5. Data materialized as Parquet files in data directory
+
+## Authentication
+
+When a `token` is provided, it's sent as a bearer token in the authorization header:
+
+```
+authorization: bearer <token>
+```
+
+### Example with Token
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "grpc://firehose.example.com:9000"
+token = "${FIREHOSE_TOKEN}"
+```
+
+### Public Endpoints
+
+Some Firehose endpoints are public and don't require authentication:
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "grpc://public-firehose.example.com:9000"
+# No token needed
+```
+
+## Supported Networks
+
+Any EVM-compatible network with a Firehose endpoint:
+
+### Ethereum and L2s
+
+```toml
+# Ethereum mainnet
+network = "mainnet"
+
+# Base L2
+network = "base"
+
+# Arbitrum One
+network = "arbitrum-one"
+
+# Optimism
+network = "optimism"
+
+# Polygon PoS
+network = "polygon"
+```
+
+### Testnets
+
+```toml
+# Sepolia testnet
+network = "sepolia"
+
+# Goerli testnet
+network = "goerli"
+```
+
+## Extracted Tables
+
+### blocks
+
+Block header information:
+
+- `number`: Block number
+- `hash`: Block hash
+- `parent_hash`: Previous block hash
+- `timestamp`: Block timestamp
+- `miner`: Block producer address
+- `size`: Block size in bytes
+- `gas_limit`, `gas_used`: Gas metrics
+- Additional protocol buffer fields
+
+### transactions
+
+Transaction data with execution results:
+
+- `block_number`, `block_hash`: Block reference
+- `transaction_index`: Position in block
+- `hash`: Transaction hash
+- `from`, `to`: Sender and recipient
+- `value`: ETH transferred
+- `gas`, `gas_price`, `gas_used`: Gas parameters
+- `status`: Execution status (success/failure)
+- `input`: Transaction input data
+
+### calls
+
+Internal call traces (unique to Firehose):
+
+- `block_number`: Block reference
+- `transaction_hash`, `transaction_index`: Transaction reference
+- `call_type`: Call type (call, create, suicide, reward)
+- `from`, `to`: Caller and callee addresses
+- `value`: ETH transferred
+- `gas`, `gas_used`: Gas consumption
+- `input`, `output`: Call data and return value
+- `depth`: Call depth in execution tree
+
+<Tip>
+The **calls** table provides complete transaction execution traces, including internal contract-to-contract calls, contract creations, and self-destructs.
+</Tip>
+
+### logs
+
+Event logs emitted by smart contracts:
+
+- `block_number`, `block_hash`: Block reference
+- `transaction_hash`, `transaction_index`: Transaction reference
+- `log_index`: Position in block
+- `address`: Contract address that emitted the log
+- `topics`: Indexed event parameters (up to 4)
+- `data`: Non-indexed event data
+
+## Protocol Buffer Format
+
+Firehose uses Protocol Buffers for efficient binary serialization:
+
+```protobuf
+// Example: Block message structure
+message Block {
+  uint64 number = 1;
+  bytes hash = 2;
+  bytes parent_hash = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  repeated Transaction transactions = 5;
+  // ... additional fields
+}
+```
+
+### Benefits
+
+- **Compact**: Smaller message sizes than JSON
+- **Fast**: Efficient serialization/deserialization
+- **Typed**: Strong schema validation
+- **Backwards compatible**: Versioned schemas
+
+## Performance Characteristics
+
+### Throughput
+
+Firehose is optimized for high-throughput extraction:
+
+- **Streaming**: Continuous block delivery without polling
+- **Compression**: Gzip reduces bandwidth by ~70%
+- **Batching**: Multiple blocks per message
+- **Parallel**: Multiple streams for different block ranges
+
+### Resource Usage
+
+- **Network**: ~10-50 MB/s during initial sync (compressed)
+- **Memory**: ~500 MB per stream
+- **CPU**: Low overhead (protocol buffer deserialization)
+
+### Reliability
+
+- **Auto-retry**: 5-second backoff on connection failures
+- **Resumable**: Stream from specific block numbers
+- **Checkpointing**: Progress tracked in metadata database
+
+## Example Configurations
+
+### StreamingFast Hosted Firehose
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "grpc://mainnet.eth.streamingfast.io:443"
+token = "${STREAMINGFAST_API_KEY}"
+```
+
+### Self-Hosted Firehose
+
+```toml
+kind = "firehose"
+network = "mainnet"
+url = "grpc://firehose.internal.example.com:9000"
+# No token for internal endpoints
+```
+
+### Base L2 Firehose
+
+```toml
+kind = "firehose"
+network = "base"
+url = "${FIREHOSE_BASE_URL}"
+token = "${FIREHOSE_BASE_TOKEN}"
+```
+
+### Polygon Firehose
+
+```toml
+kind = "firehose"
+network = "polygon"
+url = "${FIREHOSE_POLYGON_URL}"
+token = "${FIREHOSE_POLYGON_TOKEN}"
+```
+
+## Comparison: Firehose vs EVM RPC
+
+| Feature | Firehose | EVM RPC |
+|---------|----------|----------|
+| **Protocol** | gRPC streaming | JSON-RPC |
+| **Call traces** | ✅ Yes (calls table) | ❌ No (limited via debug_trace*) |
+| **Throughput** | Very high | Moderate |
+| **Latency** | Low (streaming) | Higher (request/response) |
+| **Compatibility** | Requires Firehose endpoint | Any JSON-RPC endpoint |
+| **Setup complexity** | Moderate (need credentials) | Low (standard RPC) |
+| **Cost** | Paid service | Free to paid |
+
+<Tip>
+Use **Firehose** when you need call traces or maximum throughput. Use **EVM RPC** for simpler setups with standard endpoints.
+</Tip>
+
+## Troubleshooting
+
+### Connection Failures
+
+- Verify the gRPC endpoint URL is correct
+- Check that the endpoint is accessible from your network
+- Ensure authentication token is valid and not expired
+- Test connectivity with `grpcurl`:
+
+```bash
+grpcurl -H "authorization: bearer $TOKEN" firehose.example.com:443 list
+```
+
+### Stream Errors
+
+- Check Firehose endpoint logs for errors
+- Verify block range is available on the endpoint
+- Ensure sufficient network bandwidth
+- Monitor for rate limiting or quota issues
+
+### Authentication Issues
+
+- Verify token is set correctly in environment
+- Check token hasn't expired
+- Ensure token has permissions for the requested network
+- Test with a fresh token
+
+### Performance Issues
+
+- Check network bandwidth to Firehose endpoint
+- Monitor CPU usage (protocol buffer deserialization)
+- Verify sufficient disk I/O for Parquet writes
+- Consider multiple workers for parallel extraction
+
+## Migration from Firehose to EVM RPC
+
+<Note>
+Firehose is being deprecated in favor of EVM RPC for most use cases. Consider migrating to EVM RPC providers.
+</Note>
+
+To migrate from Firehose to EVM RPC:
+
+1. Create equivalent EVM RPC provider configuration
+2. Update dataset manifests to use `evm-rpc` kind
+3. Note: **calls** table data won't be available via standard RPC
+4. Re-extract data starting from the same block range
+
+## Related Documentation
+
+- [Data Sources Overview](/sources/overview) - Provider system concepts
+- [EVM RPC Provider](/sources/evm-rpc) - Alternative JSON-RPC extraction
+- [Configuration](/configuration/overview) - Main configuration file setup

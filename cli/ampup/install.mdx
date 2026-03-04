@@ -1,0 +1,133 @@
+---
+title: Installing ampup
+description: Installation options and customization for ampup
+---
+
+## Quick Install
+
+The fastest way to install `ampup` is via the installation script:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install.sh | sh
+```
+
+<Note>
+By default, the installer will:
+- Install `ampup` to `~/.amp/bin/ampup` (or `$XDG_CONFIG_HOME/.amp/bin/ampup`)
+- Add `ampup` to your PATH automatically
+- Install the latest version of `ampd`
+</Note>
+
+## Customizing Installation
+
+The installer script accepts options to customize the installation process:
+
+### Skip PATH Modification
+
+Don't automatically add `ampup` to your PATH:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install.sh | sh -s -- --no-modify-path
+```
+
+### Skip Latest Version Installation
+
+Install only `ampup` without automatically installing the latest `ampd` version:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install.sh | sh -s -- --no-install-latest
+```
+
+### Custom Installation Directory
+
+Install to a custom directory:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install.sh | sh -s -- --install-dir /custom/path
+```
+
+### Combine Multiple Options
+
+You can combine multiple options:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/edgeandnode/amp/refs/heads/main/install.sh | sh -s -- --no-modify-path --no-install-latest --install-dir ~/.custom/amp
+```
+
+## Available Installation Options
+
+| Option | Description |
+|--------|-------------|
+| `--install-dir <DIR>` | Install to a custom directory (default: `$XDG_CONFIG_HOME/.amp` or `$HOME/.amp`) |
+| `--no-modify-path` | Don't automatically add `ampup` to your PATH |
+| `--no-install-latest` | Don't automatically install the latest `ampd` version |
+
+## Installing Specific Versions
+
+After installing `ampup`, you can install specific versions of `ampd`:
+
+```sh
+# Install latest version
+ampup install
+
+# Install specific version
+ampup install v0.1.0
+```
+
+See [Managing Versions](/cli/ampup/manage) for more details.
+
+## Supported Platforms
+
+`ampup` supports the following platforms:
+
+- **Linux**: x86_64, aarch64
+- **macOS**: aarch64 (Apple Silicon)
+
+## Post-Installation
+
+### Verify Installation
+
+After installation, restart your terminal or source your shell configuration:
+
+```sh
+# For bash
+source ~/.bashrc
+
+# For zsh
+source ~/.zshenv
+
+# For fish
+source ~/.config/fish/config.fish
+```
+
+Verify that `ampup` is accessible:
+
+```sh
+ampup --version
+```
+
+### Troubleshooting
+
+#### Command not found: ampup
+
+If you see this error, make sure the `ampup` binary is in your PATH. You may need to:
+
+1. Restart your terminal
+2. Source your shell configuration file (see above)
+3. Manually add `~/.amp/bin` to your PATH if you used `--no-modify-path`
+
+#### Download failed
+
+- Check your internet connection
+- Verify the release exists on GitHub
+- For private repos, ensure `GITHUB_TOKEN` is set correctly
+
+## Uninstalling
+
+To uninstall `ampd` and `ampup`, delete the `.amp` directory:
+
+```sh
+rm -rf ~/.amp  # or $XDG_CONFIG_HOME/.amp
+```
+
+Then remove the PATH entry from your shell configuration file.

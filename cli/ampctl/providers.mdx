@@ -1,0 +1,377 @@
+---
+title: ampctl providers
+description: Provider configuration and management commands
+---
+
+## Overview
+
+Provider management enables operators to register, list, inspect, and delete provider configurations through the Admin API and CLI. Providers are blockchain data sources (RPC endpoints, Firehose services) that must be registered before datasets can use them for data extraction.
+
+## Key Concepts
+
+- **Provider**: A blockchain data source (EVM RPC endpoint or Firehose service)
+- **Provider Registration**: Adding a new provider configuration to the system
+- **Provider Info**: API representation including name, kind, network, and configuration
+- **Environment Variables**: Providers support `${VAR_NAME}` placeholders for secrets
+
+## Provider Types
+
+### EVM RPC Provider
+
+For Ethereum and EVM-compatible chains:
+
+- Supports HTTP, HTTPS, WebSocket, and IPC endpoints
+- Used for direct blockchain node access
+- Requires a URL to the RPC endpoint
+
+### Firehose Provider
+
+For StreamingFast Firehose services:
+
+- High-performance blockchain data streaming
+- Requires URL and optional authentication token
+- Optimized for large-scale data extraction
+
+## Commands
+
+### ampctl provider register
+
+Register a new blockchain data source.
+
+```bash
+ampctl provider register <NAME> [OPTIONS]
+```
+
+<ParamField path="NAME" type="string" required>
+  Unique name for the provider (e.g., `my-mainnet-rpc`, `my-firehose`)
+</ParamField>
+
+<ParamField path="--kind" type="string" required>
+  Provider type. Options:
+  - `evm-rpc` - Ethereum RPC endpoint
+  - `firehose` - Firehose streaming service
+</ParamField>
+
+<ParamField path="--network" type="string" required>
+  Blockchain network name (e.g., `mainnet`, `sepolia`, `anvil`)
+</ParamField>
+
+<ParamField path="--url" type="string" required>
+  Provider endpoint URL. Supports environment variable placeholders like `${ETH_MAINNET_RPC_URL}`.
+  
+  For EVM RPC, valid formats:
+  - HTTP/HTTPS: `http://localhost:8545`, `https://eth.llamarpc.com`
+  - WebSocket: `ws://localhost:8546`, `wss://eth.llamarpc.com`
+  - IPC: `ipc:///tmp/geth.ipc`
+</ParamField>
+
+<ParamField path="--token" type="string">
+  Authentication token (Firehose only). Supports environment variable placeholders like `${FIREHOSE_TOKEN}`.
+</ParamField>
+
+**Examples:**
+
+```bash
+# EVM RPC provider with environment variable
+ampctl provider register my-mainnet-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${ETH_MAINNET_RPC_URL}'
+
+# Firehose provider with auth token
+ampctl provider register my-firehose \
+  --kind firehose \
+  --network mainnet \
+  --url '${FIREHOSE_URL}' \
+  --token '${FIREHOSE_TOKEN}'
+
+# Anvil local development (IPC)
+ampctl provider register anvil-ipc \
+  --kind evm-rpc \
+  --network anvil \
+  --url 'ipc:///tmp/anvil.ipc'
+
+# Anvil local development (HTTP)
+ampctl provider register anvil-local \
+  --kind evm-rpc \
+  --network anvil \
+  --url 'http://localhost:8545'
+
+# Public RPC endpoint (hardcoded URL)
+ampctl provider register public-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url 'https://eth.llamarpc.com'
+```
+
+### ampctl provider list
+
+View all registered providers.
+
+```bash
+ampctl provider list [OPTIONS]
+```
+
+**Aliases:** `ls`
+
+**Examples:**
+
+```bash
+ampctl provider list
+ampctl provider ls          # alias
+ampctl provider list --json # JSON output
+```
+
+**Output:**
+```
+Name              Kind      Network   URL
+my-mainnet-rpc    evm-rpc   mainnet   ${ETH_MAINNET_RPC_URL}
+my-firehose       firehose  mainnet   ${FIREHOSE_URL}
+anvil-local       evm-rpc   anvil     http://localhost:8545
+```
+
+**Note:** Listing displays raw configuration with `${VAR_NAME}` placeholders, not interpolated secrets.
+
+### ampctl provider inspect
+
+Get details of a specific provider.
+
+```bash
+ampctl provider inspect <NAME>
+```
+
+**Aliases:** `get`
+
+<ParamField path="NAME" type="string" required>
+  The name of the provider to inspect
+</ParamField>
+
+**Examples:**
+
+```bash
+ampctl provider inspect my-mainnet-rpc
+ampctl provider get my-mainnet-rpc  # alias
+
+# JSON output
+ampctl provider inspect my-mainnet-rpc --json
+
+# Extract URL with jq
+ampctl provider inspect my-mainnet-rpc --json | jq -r '.url'
+```
+
+**Output:**
+```
+Name: my-mainnet-rpc
+Kind: evm-rpc
+Network: mainnet
+URL: ${ETH_MAINNET_RPC_URL}
+```
+
+### ampctl provider remove
+
+Delete a provider configuration.
+
+```bash
+ampctl provider remove <NAME>
+```
+
+**Aliases:** `rm`
+
+<ParamField path="NAME" type="string" required>
+  The name of the provider to delete
+</ParamField>
+
+**Behavior:**
+- Deletion is idempotent (returns success even if provider doesn't exist)
+- Providers in use by active jobs should be stopped first
+
+**Examples:**
+
+```bash
+ampctl provider remove my-mainnet-rpc
+ampctl provider rm my-mainnet-rpc  # alias
+```
+
+## Environment Variable Substitution
+
+Providers support environment variable placeholders for sensitive data like API keys and tokens:
+
+```bash
+# Register with placeholder
+ampctl provider register my-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${ETH_RPC_URL}'
+
+# Set environment variable before running worker
+export ETH_RPC_URL="https://mainnet.infura.io/v3/YOUR_API_KEY"
+
+# Worker will interpolate the variable at runtime
+ampd worker
+```
+
+**Security best practices:**
+- Use environment variables for all secrets and API keys
+- Never commit hardcoded URLs with API keys
+- Store secrets in secure secret management systems
+- Rotate API keys regularly
+
+## Provider Configuration Examples
+
+### Ethereum Mainnet (Infura)
+
+```bash
+ampctl provider register infura-mainnet \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${INFURA_MAINNET_URL}'
+
+# Set environment variable
+export INFURA_MAINNET_URL="https://mainnet.infura.io/v3/YOUR_PROJECT_ID"
+```
+
+### Ethereum Sepolia Testnet
+
+```bash
+ampctl provider register sepolia-rpc \
+  --kind evm-rpc \
+  --network sepolia \
+  --url '${SEPOLIA_RPC_URL}'
+```
+
+### Polygon Mainnet
+
+```bash
+ampctl provider register polygon-rpc \
+  --kind evm-rpc \
+  --network polygon \
+  --url '${POLYGON_RPC_URL}'
+```
+
+### Local Anvil (Development)
+
+```bash
+# HTTP endpoint
+ampctl provider register anvil \
+  --kind evm-rpc \
+  --network anvil \
+  --url 'http://localhost:8545'
+
+# IPC endpoint (faster for local development)
+ampctl provider register anvil-ipc \
+  --kind evm-rpc \
+  --network anvil \
+  --url 'ipc:///tmp/anvil.ipc'
+```
+
+### Firehose Service
+
+```bash
+ampctl provider register eth-firehose \
+  --kind firehose \
+  --network mainnet \
+  --url '${FIREHOSE_ENDPOINT}' \
+  --token '${FIREHOSE_AUTH_TOKEN}'
+```
+
+## Direct API Access
+
+Manage providers programmatically without the CLI:
+
+```bash
+# List all providers
+curl http://localhost:1610/providers
+
+# Get specific provider
+curl http://localhost:1610/providers/my-mainnet-rpc
+
+# Create provider
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-rpc",
+    "kind": "evm-rpc",
+    "network": "mainnet",
+    "url": "${RPC_URL}"
+  }'
+
+# Delete provider
+curl -X DELETE http://localhost:1610/providers/my-mainnet-rpc
+```
+
+## Error Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `INVALID_REQUEST_BODY` | 400 | Malformed JSON in request |
+| `DATA_CONVERSION_ERROR` | 400 | JSON to TOML conversion failed |
+| `INVALID_PROVIDER_NAME` | 400 | Invalid provider name format |
+| `PROVIDER_NOT_FOUND` | 404 | Provider doesn't exist |
+| `PROVIDER_CONFLICT` | 409 | Provider name already exists |
+| `STORE_ERROR` | 500 | Storage operation failed |
+
+## Workflow Examples
+
+### Initial Setup
+
+```bash
+# Register your primary RPC provider
+ampctl provider register primary-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${PRIMARY_RPC_URL}'
+
+# Verify registration
+ampctl provider list
+
+# Check configuration
+ampctl provider inspect primary-rpc
+```
+
+### Replace Provider
+
+```bash
+# Remove old provider
+ampctl provider remove old-rpc
+
+# Register new provider with same name
+ampctl provider register old-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${NEW_RPC_URL}'
+```
+
+### Multi-Network Setup
+
+```bash
+# Mainnet
+ampctl provider register mainnet-rpc \
+  --kind evm-rpc \
+  --network mainnet \
+  --url '${MAINNET_RPC_URL}'
+
+# Sepolia testnet
+ampctl provider register sepolia-rpc \
+  --kind evm-rpc \
+  --network sepolia \
+  --url '${SEPOLIA_RPC_URL}'
+
+# Local development
+ampctl provider register anvil \
+  --kind evm-rpc \
+  --network anvil \
+  --url 'http://localhost:8545'
+
+# List all
+ampctl provider list
+```
+
+## JSON Output
+
+All provider commands support JSON output for scripting:
+
+```bash
+ampctl provider list --json
+ampctl provider inspect my-rpc --json | jq -r '.url'
+ampctl provider list --json | jq -r '.providers[] | "\(.name): \(.network)"'
+```

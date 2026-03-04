@@ -1,0 +1,306 @@
+---
+title: ampctl jobs
+description: Job control and monitoring commands
+---
+
+## Overview
+
+Job commands provide operational control over extraction jobs. Operators can list jobs with pagination, inspect job details, stop running jobs gracefully, remove individual terminal jobs, bulk-prune terminal jobs by status, and monitor sync progress with block-level detail for each table.
+
+## Key Concepts
+
+- **Job**: An extraction task that syncs blockchain data for a dataset, executed by a worker node
+- **Terminal State**: A job that has finished executing (`COMPLETED`, `STOPPED`, or `ERROR`)
+- **Progress**: Sync state of a job's tables, including `current_block`, `start_block`, and file statistics
+- **Pagination**: Jobs are listed in pages using `--limit` (default: 50) and `--after` (cursor ID)
+
+## Commands
+
+### ampctl job list
+
+List extraction jobs with pagination.
+
+```bash
+ampctl job list [OPTIONS]
+```
+
+**Aliases:** `ls`
+
+<ParamField path="--limit, -l" type="number" default="50">
+  Maximum number of jobs to return per page
+</ParamField>
+
+<ParamField path="--after, -a" type="number">
+  Cursor ID for pagination - get jobs after this ID
+</ParamField>
+
+<ParamField path="--status, -s" type="string" default="active">
+  Filter jobs by status. Options:
+  - `active` - Only non-terminal jobs (default)
+  - `all` - All jobs regardless of status
+  - `scheduled` - Jobs waiting to start
+  - `running` - Currently executing jobs
+  - `completed` - Successfully finished jobs
+  - `stopped` - Manually stopped jobs
+  - `error` - Failed jobs
+  - Multiple statuses: `scheduled,running`
+</ParamField>
+
+**Examples:**
+
+```bash
+# List first 50 jobs (default)
+ampctl job list
+ampctl job ls  # alias
+
+# List first 100 jobs
+ampctl job list --limit 100
+
+# Paginate - get next 50 jobs after ID 1234
+ampctl job list --after 1234
+
+# Filter by status (default: "active" — non-terminal jobs)
+ampctl job list --status all
+ampctl job list --status scheduled,running
+ampctl job list -s completed
+
+# Short aliases
+ampctl job list -l 20 -a 500
+```
+
+**Output:**
+```
+ID     Status    Dataset                      Worker              Started
+12345  RUNNING   ethereum/mainnet@1.0.0       worker-01           2024-03-01T10:30:00Z
+12346  SCHEDULED ethereum/sepolia@1.0.0       worker-02           —
+12347  COMPLETED optimism/mainnet@1.0.0       worker-01           2024-02-28T08:15:00Z
+```
+
+### ampctl job inspect
+
+Get detailed information about a specific job.
+
+```bash
+ampctl job inspect <JOB_ID>
+```
+
+**Aliases:** `get`
+
+<ParamField path="JOB_ID" type="number" required>
+  The unique identifier of the job
+</ParamField>
+
+**Examples:**
+
+```bash
+ampctl job inspect 12345
+ampctl job get 12345  # alias
+
+# Extract specific fields
+ampctl job inspect 12345 --json | jq '.status'
+ampctl job inspect 12345 --json | jq '.worker_id'
+```
+
+**Output:**
+```
+Job ID: 12345
+Status: RUNNING
+Dataset: ethereum/mainnet@1.0.0
+Worker: worker-01h2xcejqtf2nbrexx3vqjhp41
+Created: 2024-03-01T10:30:00Z
+Started: 2024-03-01T10:30:15Z
+End Block: continuous
+Parallelism: 4
+```
+
+### ampctl job stop
+
+Stop a running job gracefully.
+
+```bash
+ampctl job stop <JOB_ID>
+```
+
+<ParamField path="JOB_ID" type="number" required>
+  The unique identifier of the job to stop
+</ParamField>
+
+**Behavior:**
+- Requests graceful termination
+- Worker finishes current operations before stopping
+- Job transitions to `STOPPED` state
+- Use `ampctl job inspect` to confirm the job stopped
+
+**Examples:**
+
+```bash
+ampctl job stop 12345
+
+# Confirm the job stopped
+ampctl job inspect 12345
+```
+
+### ampctl job remove
+
+Delete a specific job by ID.
+
+```bash
+ampctl job remove <JOB_ID>
+```
+
+**Aliases:** `rm`
+
+<ParamField path="JOB_ID" type="number" required>
+  The unique identifier of the job to remove
+</ParamField>
+
+**Constraints:**
+- Only jobs in terminal states can be removed (`COMPLETED`, `STOPPED`, `ERROR`)
+- Running jobs must be stopped first using `ampctl job stop`
+
+**Examples:**
+
+```bash
+ampctl job rm 123
+ampctl job remove 456  # alias
+```
+
+### ampctl job prune
+
+Bulk-remove jobs by status filter.
+
+```bash
+ampctl job prune [OPTIONS]
+```
+
+<ParamField path="--status" type="string" default="completed,stopped,error">
+  Filter which jobs to prune. Options:
+  - If not specified: All terminal jobs (completed, stopped, error)
+  - `completed` - Only successfully finished jobs
+  - `stopped` - Only manually stopped jobs
+  - `error` - Only failed jobs
+</ParamField>
+
+**Examples:**
+
+```bash
+# Prune all terminal jobs (completed, stopped, error)
+ampctl job prune
+
+# Prune only completed jobs
+ampctl job prune --status completed
+
+# Prune only failed jobs
+ampctl job prune --status error
+
+# Prune only stopped jobs
+ampctl job prune --status stopped
+```
+
+### ampctl job progress
+
+Monitor job sync progress with block-level detail.
+
+```bash
+ampctl job progress <JOB_ID> [OPTIONS]
+```
+
+<ParamField path="JOB_ID" type="number" required>
+  The unique identifier of the job
+</ParamField>
+
+**Shows for each table:**
+- Current block number
+- Start block number
+- Number of files written
+- File size statistics
+
+**Examples:**
+
+```bash
+ampctl job progress 123
+ampctl job progress 123 --json
+```
+
+**Output:**
+```
+Job 123 Progress:
+
+Table: blocks
+  Current Block: 5,234,567
+  Start Block: 5,000,000
+  Files: 234 files (12.3 GB)
+  Latest Update: 2024-03-01T14:30:00Z
+
+Table: transactions
+  Current Block: 5,234,565
+  Start Block: 5,000,000
+  Files: 567 files (45.6 GB)
+  Latest Update: 2024-03-01T14:29:58Z
+```
+
+## Job Status Values
+
+| Status | Description | Terminal |
+|--------|-------------|----------|
+| `SCHEDULED` | Job is queued and waiting to start | No |
+| `RUNNING` | Job is currently executing | No |
+| `COMPLETED` | Job finished successfully | Yes |
+| `STOPPED` | Job was manually stopped | Yes |
+| `ERROR` | Job failed with an error | Yes |
+
+## Workflow Examples
+
+### Monitor a Running Job
+
+```bash
+# Check job status
+ampctl job inspect 12345
+
+# Monitor progress
+ampctl job progress 12345
+
+# Stop if needed
+ampctl job stop 12345
+
+# Verify it stopped
+ampctl job inspect 12345
+```
+
+### Clean Up Old Jobs
+
+```bash
+# List all completed jobs
+ampctl job list --status completed
+
+# Remove individual completed jobs
+ampctl job rm 100
+ampctl job rm 101
+
+# Or bulk-remove all completed jobs
+ampctl job prune --status completed
+```
+
+### Debug Failed Jobs
+
+```bash
+# List all failed jobs
+ampctl job list --status error
+
+# Inspect a specific failed job
+ampctl job inspect 12345 --json | jq '.error_message'
+
+# Clean up after investigation
+ampctl job prune --status error
+```
+
+## JSON Output
+
+All job commands support JSON output for scripting:
+
+```bash
+ampctl job list --json
+ampctl job list --json | jq '.jobs[] | select(.status == "COMPLETED")'
+ampctl job inspect 12345 --json | jq '.status'
+ampctl job progress 123 --json | jq '.tables[0].current_block'
+```

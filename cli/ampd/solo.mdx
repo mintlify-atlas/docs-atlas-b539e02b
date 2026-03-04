@@ -1,0 +1,252 @@
+---
+title: 'ampd solo'
+description: 'All-in-one development mode combining server, controller, and worker'
+---
+
+## Synopsis
+
+```bash
+ampd [--config <path>] solo [OPTIONS]
+```
+
+## Description
+
+Starts a combined server, controller, and worker in a single process for simplified local development and testing. By default, all three components (Arrow Flight, JSON Lines, and Admin API) are started along with an embedded worker.
+
+Components can be selectively enabled using flags. If no flags (`--flight-server`, `--jsonl-server`, `--admin-server`) are specified, ALL THREE are enabled by default. When any flag is specified, only the explicitly enabled components will start.
+
+The worker always runs with node ID `"worker"`. The process runs continuously until terminated (Ctrl+C or kill signal).
+
+<Warning>
+Solo mode is designed for local development and testing only. Do not use solo mode for production deployments.
+</Warning>
+
+## Options
+
+<ParamField path="--flight-server" type="boolean" default="false">
+  Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.
+  
+  Can also be set via the `FLIGHT_SERVER` environment variable.
+</ParamField>
+
+<ParamField path="--jsonl-server" type="boolean" default="false">
+  Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.
+  
+  Can also be set via the `JSONL_SERVER` environment variable.
+</ParamField>
+
+<ParamField path="--admin-server" type="boolean" default="false">
+  Enable Admin API Server. This provides management and administrative endpoints (default port 1610) for monitoring and controlling the amp system.
+  
+  Can also be set via the `ADMIN_SERVER` environment variable.
+</ParamField>
+
+## Service Ports
+
+| Service | Port | Protocol | Purpose |
+|---------|------|----------|---------||
+| Arrow Flight | 1602 | gRPC | High-performance queries |
+| JSON Lines | 1603 | HTTP | Simple query interface |
+| Admin API | 1610 | HTTP | Management operations |
+
+## Initialization Sequence
+
+1. Load configuration
+2. Connect to metadata database
+3. Create datastore (object storage)
+4. Start controller (Admin API)
+5. Start server (Flight + JSONL)
+6. Spawn embedded worker with node ID "worker"
+7. Worker registers and begins listening for jobs
+
+## Configuration
+
+Solo mode supports an optional `--config` (or `AMP_CONFIG`) file. If no config is provided, it auto-discovers `<amp_dir>/config.toml` and falls back to zero-config defaults.
+
+### Example Configuration
+
+```toml
+# Database (uses embedded PostgreSQL in solo mode if not specified)
+[metadata_db]
+url = "postgresql://localhost/amp"
+auto_migrate = true
+
+# Server ports
+flight_addr = "0.0.0.0:1602"
+jsonl_addr = "0.0.0.0:1603"
+admin_addr = "0.0.0.0:1610"
+
+# Storage directories
+data_dir = ".amp/data"
+providers_dir = ".amp/providers"
+manifests_dir = ".amp/manifests"
+```
+
+## Examples
+
+### Start with All Services (Default)
+
+```bash
+ampd solo
+```
+
+Starts Flight (1602) + JSONL (1603) + Admin API (1610) + embedded worker.
+
+### Start with Only Flight Queries
+
+```bash
+ampd solo --flight-server
+```
+
+Starts only Arrow Flight server (no JSONL, no Admin API). The embedded worker still runs.
+
+### Start with Flight and Admin API
+
+```bash
+ampd solo --flight-server --admin-server
+```
+
+Starts Flight server and Admin API (no JSONL). The embedded worker still runs.
+
+### Start with Only JSONL
+
+```bash
+ampd solo --jsonl-server
+```
+
+Starts only JSON Lines server (no Flight, no Admin API). The embedded worker still runs.
+
+### Using Environment Variables
+
+```bash
+export AMP_FLIGHT_SERVER=true
+export AMP_JSONL_SERVER=true
+export AMP_ADMIN_SERVER=true
+ampd solo
+```
+
+### With Custom Configuration
+
+```bash
+ampd --config .amp/config.toml solo
+```
+
+## When to Use Solo Mode
+
+<AccordionGroup>
+  <Accordion title="Use Solo Mode For" icon="check">
+    - Local development with fast iteration
+    - Testing the full extract-query pipeline
+    - CI/CD pipelines
+    - Learning Amp's capabilities
+    - Rapid prototyping
+  </Accordion>
+  
+  <Accordion title="Do NOT Use Solo Mode For" icon="xmark">
+    - Production deployments
+    - Resource isolation (queries vs extraction)
+    - Horizontal scaling of workers
+    - High availability requirements
+    - Independent component failure handling
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+<Warning>
+**Solo mode has significant limitations for production use:**
+
+- **No Fault Isolation**: Worker crash terminates query server
+- **Resource Contention**: Extraction competes with queries for CPU/memory
+- **Single Worker Only**: Cannot scale extraction horizontally
+- **Not Production-Ready**: Lacks robustness and high availability
+</Warning>
+
+For production deployments, use distributed mode with separate `server`, `controller`, and `worker` processes.
+
+## Development Workflow
+
+### Quick Start
+
+```bash
+# 1. Start solo mode
+ampd solo
+
+# 2. In another terminal, use the Admin API to create a job
+curl -X POST http://localhost:1610/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"dataset": "eth_mainnet", "start_block": 0, "end_block": 1000}'
+
+# 3. Query the data via JSON Lines
+curl -X POST http://localhost:1603/query/jsonl \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT * FROM eth_mainnet LIMIT 10"}'
+```
+
+### Verifying Services
+
+```bash
+# Check JSON Lines endpoint
+curl http://localhost:1603/health
+
+# Check Admin API
+curl http://localhost:1610/health
+
+# Check Arrow Flight endpoint (requires grpcurl)
+grpcurl -plaintext localhost:1602 list
+
+# Check worker status
+curl http://localhost:1610/workers
+```
+
+## Zero-Config Mode
+
+Solo mode can run without a config file for rapid testing:
+
+```bash
+ampd solo
+```
+
+This uses:
+- Auto-discovered configuration from `.amp/config.toml`
+- Default ports (1602, 1603, 1610)
+- In-memory or local storage
+- Embedded PostgreSQL (if available)
+
+## Migration from Solo to Production
+
+When moving from solo mode to production:
+
+```bash
+# Solo mode (development)
+ampd solo
+
+# Production mode (distributed)
+ampd controller &
+ampd server &
+ampd worker --node-id worker-01 &
+ampd worker --node-id worker-02 &
+```
+
+Benefits of distributed mode:
+- Independent scaling of each component
+- Fault isolation between services
+- Horizontal scaling of workers
+- Better resource management
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Solo mode shut down gracefully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during solo mode operation or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd overview](/cli/ampd/overview) - Command overview and global options
+- [ampd server](/cli/ampd/server) - Production query server mode
+- [ampd controller](/cli/ampd/controller) - Production controller mode
+- [ampd worker](/cli/ampd/worker) - Production worker mode

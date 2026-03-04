@@ -1,0 +1,247 @@
+---
+title: Managing Versions
+description: Commands for managing ampd versions with ampup
+---
+
+Once `ampup` is installed, you can use it to manage multiple versions of `ampd`.
+
+## Install Commands
+
+### Install Latest Version
+
+Install the latest version of `ampd`:
+
+```sh
+ampup
+```
+
+or explicitly:
+
+```sh
+ampup install
+```
+
+<Note>
+By default, the `ampup` installer automatically installs the latest version of `ampd` during initial setup.
+</Note>
+
+### Install Specific Version
+
+Install a specific version by specifying the version tag:
+
+```sh
+ampup install v0.1.0
+```
+
+## Version Management
+
+### List Installed Versions
+
+View all installed versions of `ampd`:
+
+```sh
+ampup list
+```
+
+### Switch Between Versions
+
+Switch to a different installed version:
+
+```sh
+ampup use v0.1.0
+```
+
+This updates the `~/.amp/bin/ampd` symlink to point to the specified version.
+
+### Uninstall a Version
+
+Remove a specific version:
+
+```sh
+ampup uninstall v0.1.0
+```
+
+## Building from Source
+
+`ampup` provides powerful options for building `ampd` from source.
+
+### Build from Main Branch
+
+Build from the default repository's main branch:
+
+```sh
+ampup build
+```
+
+### Build from Specific Branch
+
+Build from a specific branch:
+
+```sh
+ampup build --branch main
+```
+
+### Build from Specific Commit
+
+Build from a specific commit hash:
+
+```sh
+ampup build --commit abc123
+```
+
+### Build from Pull Request
+
+Build from a GitHub Pull Request:
+
+```sh
+ampup build --pr 123
+```
+
+### Build from Local Repository
+
+Build from a local repository path:
+
+```sh
+ampup build --path /path/to/amp
+```
+
+### Build from Custom Repository
+
+Build from a forked or custom repository:
+
+```sh
+ampup build --repo username/fork
+```
+
+### Combine Build Options
+
+You can combine multiple options:
+
+```sh
+# Custom repo + branch
+ampup build --repo username/fork --branch develop
+```
+
+### Custom Version Name
+
+Build with a custom version name:
+
+```sh
+ampup build --path . --name my-custom-build
+```
+
+### Specify Build Jobs
+
+Build with a specific number of parallel jobs:
+
+```sh
+ampup build --branch main --jobs 8
+```
+
+## Build Options Summary
+
+| Option | Description |
+|--------|-------------|
+| `--branch <BRANCH>` | Build from a specific branch |
+| `--commit <HASH>` | Build from a specific commit |
+| `--pr <NUMBER>` | Build from a GitHub Pull Request |
+| `--path <PATH>` | Build from a local repository |
+| `--repo <OWNER/REPO>` | Build from a custom repository |
+| `--name <NAME>` | Use a custom version name |
+| `--jobs <N>` | Number of parallel build jobs |
+
+## Update ampup
+
+Update `ampup` itself to the latest version:
+
+```sh
+ampup update
+```
+
+## Build Requirements
+
+When building from source, you need:
+
+- Rust toolchain (install from [https://rustup.rs](https://rustup.rs))
+- Git
+- Build dependencies (see main project documentation)
+
+## Environment Variables
+
+### GITHUB_TOKEN
+
+For private repository access:
+
+```sh
+export GITHUB_TOKEN="your-token-here"
+ampup build --repo owner/private-repo
+```
+
+### AMP_REPO
+
+Override the default repository:
+
+```sh
+export AMP_REPO="username/fork"
+ampup install
+```
+
+### AMP_DIR
+
+Override the installation directory:
+
+```sh
+export AMP_DIR="/custom/path"
+ampup install
+```
+
+## Examples
+
+### Install and Switch Between Versions
+
+```sh
+# Install multiple versions
+ampup install v0.1.0
+ampup install v0.2.0
+
+# List installed versions
+ampup list
+
+# Switch to v0.1.0
+ampup use v0.1.0
+
+# Verify active version
+ampd --version
+
+# Switch back to v0.2.0
+ampup use v0.2.0
+```
+
+### Test a Pull Request
+
+```sh
+# Build and test a PR
+ampup build --pr 456 --name test-pr-456
+
+# Switch to the built version
+ampup use test-pr-456
+
+# Test the changes
+ampd --help
+
+# Switch back to stable
+ampup use v0.2.0
+```
+
+### Development Workflow
+
+```sh
+# Build from local development repository
+ampup build --path ~/projects/amp --name dev-build
+
+# Use the development build
+ampup use dev-build
+
+# After testing, switch back
+ampup use v0.2.0
+```

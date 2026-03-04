@@ -1,0 +1,452 @@
+---
+title: Solana Provider
+description: Configure Solana blockchain data extraction with Old Faithful archive support
+---
+
+The Solana provider enables data extraction from the Solana blockchain using a hybrid approach: historical data from Old Faithful CAR archive files and real-time data from Solana JSON-RPC endpoints.
+
+## Overview
+
+Solana's architecture differs significantly from EVM chains:
+
+- **Slots**: Time interval units (~400ms each); not every slot produces a block
+- **Epochs**: ~432,000 slots (~2 days) grouped together
+- **Old Faithful**: Historical archive serving Solana data as CAR files
+- **CAR Files**: Content-addressable archive format (~745GB per epoch)
+
+### Extracted Tables
+
+Solana extraction produces four tables:
+
+- **block_headers**: Block metadata and slot information
+- **transactions**: Transaction data with signatures and status
+- **messages**: Transaction messages with account references
+- **instructions**: Individual program instructions within transactions
+
+## Configuration
+
+### Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Must be `"solana"` |
+| `network` | string | Network identifier (e.g., `solana-mainnet`, `solana-devnet`) |
+| `rpc_provider_info.url` | string | Solana RPC HTTP endpoint URL |
+| `of1_car_directory` | string | Local directory for CAR file cache |
+
+### Optional Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `use_archive` | string | `"always"` | Archive mode: `"auto"`, `"always"`, or `"never"` |
+| `max_rpc_calls_per_second` | number | none | Rate limit for RPC calls per second |
+| `keep_of1_car_files` | boolean | false | Retain CAR files after processing |
+| `rpc_provider_info.auth_token` | string | none | RPC authentication token |
+| `rpc_provider_info.auth_header` | string | none | Custom authentication header name |
+| `fallback_rpc_provider_info.url` | string | none | Fallback RPC endpoint for truncated logs |
+| `commitment` | string | `"finalized"` | Commitment level: `"processed"`, `"confirmed"`, or `"finalized"` |
+
+### Basic Configuration
+
+```toml
+kind = "solana"
+network = "solana-mainnet"
+of1_car_directory = "/data/solana/car"
+
+[rpc_provider_info]
+url = "${SOLANA_RPC_URL}"
+```
+
+### Full Configuration
+
+```toml
+kind = "solana"
+network = "solana-mainnet"
+of1_car_directory = "/data/solana/car"
+
+# Archive mode
+use_archive = "auto"  # "always", "auto", or "never"
+
+# Rate limiting
+max_rpc_calls_per_second = 50
+
+# CAR file management
+keep_of1_car_files = false
+
+# Commitment level
+commitment = "finalized"
+
+# Primary RPC provider
+[rpc_provider_info]
+url = "${SOLANA_RPC_URL}"
+auth_token = "${SOLANA_RPC_AUTH_TOKEN}"
+auth_header = "Authorization"
+
+# Fallback RPC for truncated logs (optional)
+[fallback_rpc_provider_info]
+url = "${FALLBACK_SOLANA_RPC_URL}"
+auth_token = "${FALLBACK_SOLANA_RPC_AUTH_TOKEN}"
+```
+
+## Archive Modes
+
+The `use_archive` setting controls when to use Old Faithful archive vs. RPC:
+
+### Always (Default)
+
+```toml
+use_archive = "always"
+```
+
+- Always downloads CAR files from Old Faithful
+- Best for historical data extraction
+- Requires ~745GB disk space per epoch
+- Download can take 10+ hours per epoch
+
+### Auto
+
+```toml
+use_archive = "auto"
+```
+
+- Uses RPC for recent slots (last 10,000 slots, ~83 minutes)
+- Uses archive for historical data
+- Optimizes for recent data extraction
+- Reduces disk space requirements
+
+### Never
+
+```toml
+use_archive = "never"
+```
+
+- Always uses RPC endpoint
+- Best for demos and recent data
+- No CAR file downloads
+- Limited by RPC retention (typically 1-2 weeks)
+
+<Tip>
+Use `"auto"` mode for most use cases to balance performance and disk usage.
+</Tip>
+
+## Data Extraction Flow
+
+The Solana extractor uses a two-stage approach:
+
+```
+Historical Data                    Real-time Data
+     ↓                                  ↓
+Old Faithful Archive → CAR files → RPC endpoint
+     ↓                                  ↓
+  Download epoch CAR              getBlock calls
+     ↓                                  ↓
+  Process locally                 Stream blocks
+     ↓                                  ↓
+  Delete CAR (optional)           Continuous sync
+     ↓                                  ↓
+        Parquet Tables (block_headers, transactions, messages, instructions)
+```
+
+### Data Sources
+
+| Stage | Source | Data |
+|-------|--------|------|
+| Historical | Old Faithful (`files.old-faithful.net`) | Archived epoch CAR files (~745GB each) |
+| Real-time | Solana RPC | Live blocks via JSON-RPC `getBlock` |
+
+## RPC Authentication
+
+Solana RPC providers often require authentication for higher rate limits:
+
+### Bearer Token (Default)
+
+```toml
+[rpc_provider_info]
+url = "https://api.mainnet-beta.solana.com"
+auth_token = "${SOLANA_RPC_AUTH_TOKEN}"
+```
+
+Sends: `Authorization: Bearer <token>`
+
+### Custom Header
+
+Some providers use custom authentication headers:
+
+```toml
+[rpc_provider_info]
+url = "https://solana-api.example.com"
+auth_token = "${SOLANA_API_KEY}"
+auth_header = "X-API-Key"
+```
+
+Sends: `X-API-Key: <token>`
+
+## Rate Limiting
+
+Public Solana RPC endpoints typically have strict rate limits:
+
+```toml
+# 50 requests per second
+max_rpc_calls_per_second = 50
+
+# 10 requests per second (conservative)
+max_rpc_calls_per_second = 10
+```
+
+<Warning>
+Solana's public RPC has aggressive rate limiting. Use a paid provider or run your own node for production use.
+</Warning>
+
+## CAR File Management
+
+Old Faithful CAR files are large (~745GB per epoch). Control disk usage:
+
+### Delete After Processing (Default)
+
+```toml
+keep_of1_car_files = false
+```
+
+- CAR files deleted after extraction
+- Saves disk space
+- Must re-download for reprocessing
+
+### Retain CAR Files
+
+```toml
+keep_of1_car_files = true
+```
+
+- CAR files retained on disk
+- Enables fast reprocessing
+- Requires substantial disk space (~745GB per epoch)
+
+### Storage Recommendations
+
+- **Auto mode**: 1-2TB for recent epochs
+- **Always mode**: 5-10TB for multiple epochs
+- **Never mode**: Minimal storage (no CAR files)
+
+## Commitment Levels
+
+Solana supports different commitment levels for query consistency:
+
+```toml
+# Highest finality (default)
+commitment = "finalized"
+
+# Supermajority voted
+commitment = "confirmed"
+
+# Heaviest fork
+commitment = "processed"
+```
+
+| Level | Finality | Use Case |
+|-------|----------|----------|
+| `finalized` | Highest (max vote lockout) | Production extraction |
+| `confirmed` | High (supermajority vote) | Recent data with good confidence |
+| `processed` | Low (heaviest fork) | Real-time monitoring |
+
+<Note>
+Use `"finalized"` for production data extraction to avoid reorgs.
+</Note>
+
+## Fallback RPC Provider
+
+Solana logs may be truncated by RPC providers. Configure a fallback:
+
+```toml
+[rpc_provider_info]
+url = "${SOLANA_RPC_URL}"  # May return truncated logs
+
+[fallback_rpc_provider_info]
+url = "${PREMIUM_SOLANA_RPC_URL}"  # Higher or no truncation limit
+auth_token = "${PREMIUM_SOLANA_RPC_AUTH_TOKEN}"
+```
+
+The fallback is used only when the primary RPC returns truncated logs.
+
+## Extracted Tables
+
+### block_headers
+
+Block and slot metadata:
+
+- `slot`: Slot number (not sequential due to skipped slots)
+- `parent_slot`: Previous slot number
+- `block_hash`: Block hash
+- `block_height`: Sequential block height
+- `block_time`: Unix timestamp
+- `previous_blockhash`: Previous block hash
+
+### transactions
+
+Transaction data and results:
+
+- `slot`: Slot reference
+- `tx_index`: Position in block
+- `signatures`: Transaction signatures (array)
+- `message_hash`: Message hash
+- `status`: Transaction status (success/failure)
+- `fee`: Transaction fee in lamports
+- `pre_balances`, `post_balances`: Account balances before/after
+- `log_messages`: Execution logs
+
+### messages
+
+Transaction message structure:
+
+- `slot`, `tx_index`: Transaction reference
+- `recent_blockhash`: Recent block hash for validation
+- `account_keys`: Account addresses referenced
+- `header`: Message header with signature counts
+- `address_table_lookups`: Address lookup table references
+
+### instructions
+
+Program instructions executed:
+
+- `slot`, `tx_index`: Transaction reference
+- `instruction_index`: Position in transaction
+- `program_id_index`: Index into account_keys for program
+- `accounts`: Account indices used by instruction
+- `data`: Instruction data (base58 encoded)
+- `stack_height`: Call stack depth
+
+## Slot Handling
+
+Solana's slot-based architecture differs from EVM block numbers:
+
+### Skipped Slots
+
+Not every slot produces a block:
+
+- Skipped slots create gaps in the slot sequence
+- No data rows for skipped slots
+- `block_height` is sequential (no gaps)
+- `slot` has gaps for skipped slots
+
+### Chain Integrity
+
+Validation uses hash chains:
+
+- Each block's `previous_blockhash` must match the previous block's hash
+- Ensures data integrity despite slot gaps
+
+## Example Configurations
+
+### Mainnet with Auto Mode
+
+```toml
+kind = "solana"
+network = "solana-mainnet"
+of1_car_directory = "/data/solana/car"
+use_archive = "auto"
+max_rpc_calls_per_second = 50
+
+[rpc_provider_info]
+url = "https://api.mainnet-beta.solana.com"
+```
+
+### Mainnet with Paid RPC
+
+```toml
+kind = "solana"
+network = "solana-mainnet"
+of1_car_directory = "/data/solana/car"
+use_archive = "auto"
+max_rpc_calls_per_second = 100
+
+[rpc_provider_info]
+url = "${HELIUS_RPC_URL}"
+auth_token = "${HELIUS_API_KEY}"
+```
+
+### Devnet (RPC Only)
+
+```toml
+kind = "solana"
+network = "solana-devnet"
+of1_car_directory = "/tmp/solana/car"
+use_archive = "never"  # Devnet: use RPC only
+max_rpc_calls_per_second = 20
+
+[rpc_provider_info]
+url = "https://api.devnet.solana.com"
+```
+
+### With Fallback for Log Truncation
+
+```toml
+kind = "solana"
+network = "solana-mainnet"
+of1_car_directory = "/data/solana/car"
+use_archive = "auto"
+
+[rpc_provider_info]
+url = "${SOLANA_RPC_URL}"
+
+[fallback_rpc_provider_info]
+url = "${PREMIUM_SOLANA_RPC_URL}"
+auth_token = "${PREMIUM_SOLANA_API_KEY}"
+```
+
+## Troubleshooting
+
+### CAR Download Failures
+
+- Check network connectivity to `files.old-faithful.net`
+- Verify sufficient disk space in `of1_car_directory`
+- Ensure directory is writable
+- Try downloading manually to test connectivity
+
+### RPC Rate Limiting
+
+- Reduce `max_rpc_calls_per_second`
+- Upgrade to a paid RPC provider
+- Run your own Solana validator
+- Use `"always"` archive mode to minimize RPC calls
+
+### Truncated Logs
+
+- Configure `fallback_rpc_provider_info` with a higher-tier provider
+- Use a provider without log truncation limits
+- Check provider documentation for log limits
+
+### Skipped Slots
+
+This is normal Solana behavior:
+
+- Not every slot produces a block
+- Use `block_height` for sequential numbering
+- Use `slot` for precise timing and ordering
+
+### Disk Space Issues
+
+- Set `keep_of1_car_files = false` to delete after processing
+- Use `"auto"` or `"never"` archive mode for recent data
+- Monitor disk usage in `of1_car_directory`
+- Provision sufficient storage for your extraction range
+
+## Performance Characteristics
+
+### Initial Sync (Archive Mode)
+
+- **CAR download**: 10+ hours per epoch (typical broadband)
+- **CAR processing**: 30-60 minutes per epoch
+- **Disk space**: ~745GB per epoch (temporary if deleted after)
+- **Total time**: Historical sync is slow (weeks for full history)
+
+### Real-time Sync (RPC Mode)
+
+- **Latency**: Slots processed within seconds
+- **Throughput**: Limited by RPC rate limits
+- **Disk space**: Minimal (no CAR files)
+- **Reliability**: Depends on RPC provider uptime
+
+## Related Documentation
+
+- [Data Sources Overview](/sources/overview) - Provider system concepts
+- [EVM RPC Provider](/sources/evm-rpc) - EVM blockchain extraction
+- [Configuration](/configuration/overview) - Main configuration file setup

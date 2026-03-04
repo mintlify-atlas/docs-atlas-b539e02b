@@ -1,0 +1,221 @@
+---
+title: What is Amp?
+description: A blockchain-native database for extracting, transforming, and querying blockchain data at scale
+---
+
+## Overview
+
+Amp is a high-performance blockchain data platform that extracts, transforms, and serves blockchain data through SQL queries. Built on the FDAP stack (Apache Arrow Flight, DataFusion, Arrow, and Parquet), Amp provides a complete ETL pipeline for blockchain analytics and data services.
+
+<Info>
+  Amp combines the familiarity of SQL with the performance of Apache Arrow to deliver real-time blockchain data access at scale.
+</Info>
+
+## What Amp Does
+
+Amp solves the core challenge of working with blockchain data: **how to efficiently extract, transform, and query ever-growing blockchain datasets**.
+
+- **Extract**: Pull data from multiple blockchain sources (EVM RPC, Firehose, Solana)
+- **Transform**: Process data using SQL queries with custom user-defined functions (UDFs)
+- **Store**: Save as optimized Parquet files in object storage
+- **Serve**: Query data through Arrow Flight (gRPC) and JSON Lines (HTTP) interfaces
+
+## Key Features
+
+### Multi-Source Extraction
+
+Connect to blockchain data from various sources:
+
+- **EVM RPC**: Ethereum and EVM-compatible chains via JSON-RPC endpoints
+- **Firehose**: StreamingFast's high-performance gRPC streaming protocol
+- **Solana**: Solana blockchain data via RPC and archive formats
+
+Each extractor produces normalized tables (blocks, transactions, logs) stored as Parquet files.
+
+### SQL-Based Transformations
+
+Define derived datasets using standard SQL:
+
+```sql
+SELECT 
+  block_num,
+  evm_decode_hex(address) as contract_address,
+  evm_decode_hex(topics[1]) as event_signature,
+  COUNT(*) as event_count
+FROM "my_namespace/eth_mainnet".logs
+WHERE block_num > 19000000
+GROUP BY block_num, address, topics[1]
+```
+
+Amp extends SQL with built-in UDFs for blockchain-specific operations like hex decoding, ABI type conversion, and event log parsing.
+
+### Dual Query Interfaces
+
+Query your data through two complementary interfaces:
+
+<CardGroup cols={2}>
+  <Card title="Arrow Flight" icon="rocket">
+    High-performance gRPC interface using Apache Arrow format. Ideal for large-scale analytics, streaming queries, and applications that consume Arrow data directly.
+  </Card>
+  <Card title="JSON Lines" icon="brackets-curly">
+    Simple HTTP POST interface returning newline-delimited JSON. Perfect for ad-hoc queries, curl commands, and tools that support HTTP.
+  </Card>
+</CardGroup>
+
+### Flexible Deployment Modes
+
+Amp adapts to your deployment needs:
+
+- **Solo Mode** (`ampd solo`): All-in-one process for local development and testing
+- **Distributed Mode**: Separate server, controller, and worker components for production deployments
+- **Query-Only Mode**: Serve data without running extraction jobs
+- **Multi-Region**: Deploy globally with shared metadata and object storage
+
+See the [Operational Modes](https://github.com/edgeandnode/amp/blob/main/docs/modes.md) documentation for detailed deployment patterns.
+
+### Production-Ready Storage
+
+- **Columnar Format**: Parquet files optimized for analytical queries
+- **Object Storage**: Support for S3, GCS, and Azure Blob Storage
+- **Automatic Compaction**: Configurable file compaction for optimal query performance
+- **Garbage Collection**: Automatic cleanup of obsolete files
+
+## Architecture Overview
+
+Amp follows a distributed architecture with three core components:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Amp Cluster                         │
+│                                                         │
+│  ┌────────────┐  ┌────────────┐  ┌─────────────────┐  │
+│  │ Controller │  │   Server   │  │ Worker Node(s)  │  │
+│  │ (Admin API)│  │ (Queries)  │  │ (Extraction)    │  │
+│  │ Port 1610  │  │ 1602, 1603 │  │                 │  │
+│  └────────────┘  └────────────┘  └─────────────────┘  │
+│         │               │                  │           │
+│         └───────────────┴──────────────────┘           │
+│                         │                              │
+└─────────────────────────┼──────────────────────────────┘
+                          │
+              ┌───────────┴────────────┐
+              │                        │
+        PostgreSQL              Object Storage
+      (Metadata DB)            (Parquet Files)
+```
+
+### Controller
+
+Manages job scheduling, worker coordination, and provides the Admin API for:
+
+- Dataset registration and versioning
+- Job deployment and monitoring
+- Worker health tracking
+- File metadata queries
+
+### Server
+
+Provides query interfaces:
+
+- **Arrow Flight** (port 1602): High-performance binary protocol over gRPC
+- **JSON Lines** (port 1603): HTTP POST endpoint returning NDJSON
+
+### Workers
+
+Execute extraction jobs in parallel:
+
+- Pull data from blockchain sources
+- Write Parquet files to object storage
+- Update metadata database with progress
+- Coordinate via PostgreSQL LISTEN/NOTIFY
+
+### Metadata Database
+
+PostgreSQL database tracking:
+
+- Dataset manifests and versions
+- Extraction job status and progress
+- File metadata and locations
+- Worker heartbeats and health
+
+## Technology Stack
+
+Amp is built on proven open-source technologies:
+
+- **Language**: Rust for performance and safety
+- **Query Engine**: Apache DataFusion for SQL execution
+- **Storage Format**: Apache Parquet for columnar storage
+- **Wire Format**: Apache Arrow for zero-copy data transfer
+- **Database**: PostgreSQL for metadata and coordination
+- **Observability**: OpenTelemetry for metrics and traces
+
+## Use Cases
+
+### Blockchain Analytics
+
+Extract and analyze blockchain data using familiar SQL:
+
+```sql
+SELECT 
+  DATE_TRUNC('hour', TIMESTAMP '1970-01-01' + block_timestamp * INTERVAL '1 second') as hour,
+  COUNT(*) as transaction_count,
+  SUM(gas_used) as total_gas
+FROM "namespace/eth_mainnet".transactions
+WHERE block_num BETWEEN 18000000 AND 19000000
+GROUP BY hour
+ORDER BY hour
+```
+
+### Data Services
+
+Build data APIs on top of Amp's query interfaces:
+
+- Serve blockchain data to applications via Arrow Flight
+- Export data to warehouses using Arrow format
+- Create derived datasets for specific use cases
+
+### Real-Time Monitoring
+
+Stream blockchain data using Amp's streaming query support:
+
+```sql
+SELECT * FROM "namespace/eth_mainnet".logs 
+WHERE address = '0x...' 
+SETTINGS stream = true
+```
+
+### Cross-Chain Analytics
+
+Query multiple blockchain datasets in a single SQL statement:
+
+```sql
+SELECT 
+  'ethereum' as chain,
+  COUNT(*) as block_count
+FROM "namespace/eth_mainnet".blocks
+UNION ALL
+SELECT 
+  'base' as chain,
+  COUNT(*) as block_count
+FROM "namespace/base_mainnet".blocks
+```
+
+## Next Steps
+
+Ready to get started with Amp?
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Amp using ampup, Nix, or build from source
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get querying blockchain data in under 5 minutes
+  </Card>
+</CardGroup>
+
+## Learn More
+
+- [Architecture Documentation](https://github.com/edgeandnode/amp/blob/main/docs/architecture.md)
+- [Configuration Guide](https://github.com/edgeandnode/amp/blob/main/docs/config.md)
+- [Operational Modes](https://github.com/edgeandnode/amp/blob/main/docs/modes.md)
+- [GitHub Repository](https://github.com/edgeandnode/amp)

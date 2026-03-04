@@ -1,0 +1,285 @@
+---
+title: Provider Endpoints
+description: Configure external blockchain data sources
+---
+
+Provider endpoints allow you to configure external blockchain data sources that Amp uses for data extraction. Providers define connection details for RPC endpoints, Firehose streams, and other data sources.
+
+## List Providers
+
+<api method="GET" endpoint="/providers" />
+
+Retrieves complete information for all provider configurations.
+
+<Warning>
+  This endpoint returns the complete provider configuration including all configuration details. Ensure that sensitive information such as API keys and connection strings are not stored in provider configuration files.
+</Warning>
+
+### Response
+
+<ResponseField name="providers" type="array" required>
+  List of all provider configurations with complete details
+  
+  <Expandable title="Provider Info">
+    <ResponseField name="name" type="string" required>
+      The name/identifier of the provider
+    </ResponseField>
+    <ResponseField name="kind" type="string" required>
+      The type of provider (e.g., "evm-rpc", "firehose")
+    </ResponseField>
+    <ResponseField name="..." type="object">
+      Additional provider-specific configuration fields (e.g., `network`, `url`)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:1610/providers
+```
+
+### Example Response
+
+```json
+{
+  "providers": [
+    {
+      "name": "alchemy-mainnet",
+      "kind": "evm-rpc",
+      "network": "mainnet",
+      "url": "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+    },
+    {
+      "name": "firehose-eth",
+      "kind": "firehose",
+      "endpoint": "mainnet.eth.streamingfast.io:443"
+    }
+  ]
+}
+```
+
+## Get Provider Details
+
+<api method="GET" endpoint="/providers/{name}" />
+
+Retrieves complete information for a specific provider configuration by its name.
+
+<Warning>
+  This endpoint returns the complete provider configuration. Ensure sensitive information is properly filtered before storage.
+</Warning>
+
+### Path Parameters
+
+<ParamField path="name" type="string" required>
+  The unique name/identifier of the provider to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="name" type="string" required>
+  The name/identifier of the provider
+</ResponseField>
+
+<ResponseField name="kind" type="string" required>
+  The type of provider
+</ResponseField>
+
+<ResponseField name="..." type="object">
+  Additional provider-specific configuration fields
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:1610/providers/alchemy-mainnet
+```
+
+### Example Response
+
+```json
+{
+  "name": "alchemy-mainnet",
+  "kind": "evm-rpc",
+  "network": "mainnet",
+  "url": "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+}
+```
+
+### Response Codes
+
+- **200 OK** - Provider information retrieved successfully
+- **400 Bad Request** - Invalid provider name format
+- **404 Not Found** - Provider not found
+- **500 Internal Server Error** - Conversion error
+
+## Create or Update Provider
+
+<api method="POST" endpoint="/providers" />
+
+Creates or updates a provider configuration. If the provider already exists, it will be overwritten.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  The unique identifier for the provider
+</ParamField>
+
+<ParamField body="kind" type="string" required>
+  The type of provider (e.g., "evm-rpc", "firehose")
+</ParamField>
+
+<ParamField body="..." type="object">
+  Additional provider-specific configuration fields as needed (e.g., `network`, `url`)
+</ParamField>
+
+### Example Request - EVM RPC Provider
+
+```bash
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "alchemy-mainnet",
+    "kind": "evm-rpc",
+    "network": "mainnet",
+    "url": "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+  }'
+```
+
+### Example Request - Firehose Provider
+
+```bash
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "firehose-eth",
+    "kind": "firehose",
+    "endpoint": "mainnet.eth.streamingfast.io:443",
+    "token": "YOUR_TOKEN"
+  }'
+```
+
+### Response Codes
+
+- **201 Created** - Provider created or updated successfully
+- **400 Bad Request** - Invalid request body or provider configuration
+- **500 Internal Server Error** - Store error
+
+<Tip>
+  Providers are reusable across multiple dataset definitions. Create providers once and reference them by name in your dataset manifests.
+</Tip>
+
+## Delete Provider
+
+<api method="DELETE" endpoint="/providers/{name}" />
+
+Deletes a specific provider configuration by its name. This operation is idempotent - deleting a non-existent provider returns success.
+
+### Path Parameters
+
+<ParamField path="name" type="string" required>
+  The unique name/identifier of the provider to delete
+</ParamField>
+
+### Response Codes
+
+- **204 No Content** - Provider successfully deleted (or did not exist)
+- **400 Bad Request** - Invalid provider name format
+- **500 Internal Server Error** - Store error
+
+### Example Request
+
+```bash
+curl -X DELETE http://localhost:1610/providers/alchemy-mainnet
+```
+
+<Warning>
+  Once deleted, the provider configuration cannot be recovered. Any datasets using this provider may fail until a new provider is configured.
+</Warning>
+
+## Provider Types
+
+### EVM RPC Provider
+
+Used for extracting data from EVM-compatible chains via JSON-RPC:
+
+```json
+{
+  "name": "alchemy-mainnet",
+  "kind": "evm-rpc",
+  "network": "mainnet",
+  "url": "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+}
+```
+
+**Required fields:**
+- `name` - Unique provider identifier
+- `kind` - Must be "evm-rpc"
+- `network` - Network name (e.g., "mainnet", "polygon")
+- `url` - RPC endpoint URL
+
+### Firehose Provider
+
+Used for extracting data from Firehose streams:
+
+```json
+{
+  "name": "firehose-eth",
+  "kind": "firehose",
+  "endpoint": "mainnet.eth.streamingfast.io:443",
+  "token": "YOUR_TOKEN"
+}
+```
+
+**Required fields:**
+- `name` - Unique provider identifier
+- `kind` - Must be "firehose"
+- `endpoint` - Firehose endpoint address
+- `token` - Authentication token (optional)
+
+## Security Considerations
+
+<Warning>
+  **API Keys and Secrets**: Do not store sensitive credentials directly in provider configurations. Use environment variables or secret management systems instead.
+</Warning>
+
+Best practices:
+
+1. **Use environment variables** for sensitive values
+2. **Restrict API access** to the Admin API
+3. **Rotate credentials** regularly
+4. **Monitor provider usage** for anomalies
+
+## Common Use Cases
+
+### Multi-Network Setup
+
+Create providers for different networks:
+
+```bash
+# Ethereum Mainnet
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "eth-mainnet", "kind": "evm-rpc", "network": "mainnet", "url": "..."}'
+
+# Polygon
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "polygon", "kind": "evm-rpc", "network": "polygon", "url": "..."}'
+```
+
+### Provider Failover
+
+Create backup providers for redundancy:
+
+```bash
+# Primary provider
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "alchemy-primary", "kind": "evm-rpc", "network": "mainnet", "url": "..."}'
+
+# Backup provider
+curl -X POST http://localhost:1610/providers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "infura-backup", "kind": "evm-rpc", "network": "mainnet", "url": "..."}'
+```

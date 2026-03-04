@@ -1,0 +1,258 @@
+---
+title: "Deployment Modes"
+description: "Understanding Amp's deployment modes and when to use each"
+---
+
+Amp provides two primary operational modes that can be combined into different deployment patterns. Understanding these modes is essential for choosing the right architecture for your use case.
+
+## Operational Modes
+
+Amp supports two primary operational modes:
+
+<CardGroup cols={2}>
+  <Card title="Solo Mode" icon="laptop-code" href="/deployment/solo-mode">
+    Single-process mode combining all components for local development and testing
+  </Card>
+  <Card title="Distributed Mode" icon="network-wired" href="/deployment/distributed-mode">
+    Separate server, worker, and controller components for production deployments
+  </Card>
+</CardGroup>
+
+## Core Components
+
+Amp provides several commands that can be combined into different deployment patterns:
+
+### Server
+
+Query server providing Arrow Flight and JSON Lines interfaces for data access.
+
+- **Port 1602**: Arrow Flight (gRPC) - high-performance binary queries
+- **Port 1603**: JSON Lines (HTTP) - simple query interface
+- **Use case**: Query serving without extraction workers
+
+```bash
+ampd server
+```
+
+### Worker
+
+Standalone worker process for executing scheduled extraction jobs.
+
+- Coordinates via metadata database
+- Executes dump jobs and writes Parquet files
+- Supports horizontal scaling
+- **Requires**: `--node-id` for unique identification
+
+```bash
+ampd worker --node-id worker-01
+```
+
+### Controller
+
+Controller service providing the Admin API for job management.
+
+- **Port 1610**: Admin API (HTTP) - management operations
+- Schedules and monitors jobs
+- Tracks worker health
+- Manages dataset registry
+
+```bash
+ampd controller
+```
+
+### Migrate
+
+Run database migrations on the metadata database.
+
+```bash
+ampd migrate
+```
+
+## Mode Selection Guide
+
+Choose the right mode based on your deployment requirements:
+
+### Use Solo Mode When:
+
+<Check>Local development and quick prototyping</Check>
+<Check>Testing the full extract-query pipeline</Check>
+<Check>CI/CD pipelines</Check>
+<Check>Learning Amp capabilities</Check>
+
+<Warning>**Never use solo mode for production deployments**</Warning>
+
+### Use Distributed Mode When:
+
+<Check>Production deployments requiring high availability</Check>
+<Check>Resource isolation between queries and extraction</Check>
+<Check>Horizontal scaling of extraction workers</Check>
+<Check>Independent component failure handling</Check>
+<Check>Multi-region deployments</Check>
+
+## Architecture Differences
+
+### Solo Mode Architecture
+
+```
+┌──────────────────────────────────────────┐
+│ ampd solo                                │
+│ ┌──────────────┐ ┌────────────────────┐  │
+│ │Server        │ │ Controller         │  │
+│ │- Flight      │ │ - Admin API        │  │
+│ │- JSON Lines  │ │                    │  │
+│ └──────────────┘ └────────────────────┘  │
+│ ┌──────────────┐                         │
+│ │ Worker       │                         │
+│ │ (embedded)   │                         │
+│ └──────────────┘                         │
+└──────────────────────────────────────────┘
+    │
+    ├─ PostgreSQL (metadata)
+    └─ Object Store (parquet files)
+```
+
+**Characteristics:**
+- Single process
+- All components share resources
+- Fixed worker node ID "worker"
+- No fault isolation
+- Resource contention between queries and extraction
+
+### Distributed Mode Architecture
+
+```
+┌────────────────────┐   ┌──────────────────┐
+│ampd server         │   │ampd controller   │
+│┌──────────────────┐│   │┌────────────────┐│
+││Server            ││   ││Controller      ││
+││- Flight          ││   ││- Admin API     ││
+││- JSON Lines      ││   │└────────────────┘│
+│└──────────────────┘│   └──────────────────┘
+└────────────────────┘            │
+         │                        │
+         │               ┌──────────────────┐
+         │               │ampd worker       │
+         │               │┌────────────────┐│
+         │               ││Worker-1        ││
+         │               │└────────────────┘│
+         │               └──────────────────┘
+         │               ┌──────────────────┐
+         │               │ampd worker       │
+         │               │┌────────────────┐│
+         │               ││Worker-2        ││
+         │               │└────────────────┘│
+         │               └──────────────────┘
+         │                      │
+         └──────────────────────┘
+         │
+         ├─ PostgreSQL (metadata, coordination)
+         └─ Object Store (parquet files)
+```
+
+**Characteristics:**
+- Separate processes for each component
+- Resource isolation
+- Independent scaling
+- Fault isolation (worker crash doesn't affect queries)
+- Multiple workers for horizontal scaling
+
+## Common Deployment Patterns
+
+### Pattern 1: Local Development (Solo)
+
+**When to use:**
+- Local development and testing
+- CI/CD pipelines
+- Quick prototyping
+
+**Not suitable for production**
+
+```bash
+ampd solo
+```
+
+### Pattern 2: Query-Only Server (Distributed)
+
+**When to use:**
+- Read-only query serving
+- Datasets populated by external processes
+- Multiple query replicas for load balancing
+
+```bash
+ampd server
+```
+
+### Pattern 3: Full Distributed (Production)
+
+**When to use:**
+- Production deployments
+- Resource isolation needed
+- Horizontal scaling required
+- High availability important
+
+```bash
+# Server node
+ampd server
+
+# Controller node
+ampd controller
+
+# Worker nodes (multiple)
+ampd worker --node-id worker-01
+ampd worker --node-id worker-02
+ampd worker --node-id worker-03
+```
+
+### Pattern 4: Multi-Region Distributed
+
+**When to use:**
+- Global deployments with low-latency requirements
+- Geographic redundancy
+- Load distribution across regions
+
+```bash
+# Region A
+ampd server
+ampd controller
+ampd worker --node-id us-east-1-worker
+
+# Region B
+ampd server
+ampd worker --node-id eu-west-1-worker
+```
+
+## Scaling Path
+
+Recommended progression for growing deployments:
+
+<Steps>
+  <Step title="Development & Testing">
+    Use `ampd solo` for local development and testing. Single machine, minimal setup. **Not for production use.**
+  </Step>
+  
+  <Step title="Production Single-Region">
+    Deploy separate `ampd controller`, `ampd server`, and `ampd worker` instances. Enable observability and configure compaction.
+  </Step>
+  
+  <Step title="Scaled Distributed Extraction">
+    Deploy multiple `ampd server` instances for query load balancing and multiple `ampd worker` instances for parallel extraction.
+  </Step>
+  
+  <Step title="Multi-Region Production">
+    Deploy `ampd server` in different regions for low-latency queries. Deploy `ampd worker` instances near data sources.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Solo Mode Setup" icon="rocket" href="/deployment/solo-mode">
+    Get started with local development using solo mode
+  </Card>
+  <Card title="Distributed Deployment" icon="server" href="/deployment/distributed-mode">
+    Deploy Amp in distributed mode for production
+  </Card>
+  <Card title="Production Guide" icon="shield-check" href="/deployment/production">
+    Best practices for production deployments
+  </Card>
+</CardGroup>

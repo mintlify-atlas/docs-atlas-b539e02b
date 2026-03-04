@@ -1,0 +1,223 @@
+---
+title: 'ampd controller'
+description: 'Start controller service with Admin API'
+---
+
+## Synopsis
+
+```bash
+ampd --config <path> controller
+```
+
+## Description
+
+Starts the controller service that provides the Admin API for managing Amp operations. The controller runs as a standalone service separate from query servers, enabling independent deployment and scaling of management operations.
+
+Default port: **1610** (Admin API)
+
+The controller provides endpoints for dataset management, job control, worker coordination, and file operations. It runs continuously until terminated (Ctrl+C or kill signal).
+
+## Responsibilities
+
+| Responsibility | Description |
+|---------------|-------------|
+| Admin API | RESTful management interface on port 1610 |
+| Job Management | Create, monitor, and stop extraction jobs |
+| Worker Registry | Track worker heartbeats and status |
+| Dataset Registry | Manage dataset definitions and versions |
+
+## Configuration
+
+Controller settings are configured in the TOML config file:
+
+```toml
+# Admin API server binding
+admin_addr = "0.0.0.0:1610"
+
+# Database connection
+[metadata_db]
+url = "postgresql://user:password@localhost/amp"
+```
+
+### Configuration Fields
+
+<ParamField path="admin_addr" type="string" default="0.0.0.0:1610">
+  Admin API server binding address and port
+</ParamField>
+
+### Environment Override
+
+```bash
+export AMP_CONFIG_ADMIN_ADDR="0.0.0.0:1610"
+```
+
+## Directory Configuration
+
+`ampd controller` requires `--config` (or `AMP_CONFIG`) to be provided. Default `data`, `providers`, and `manifests` directory paths are resolved relative to the config file's parent directory only when the config file does not specify those paths.
+
+When the config file specifies `data_dir`, `providers_dir`, or `manifests_dir`, those values are used directly.
+
+This command does not create directories itself; it relies on the configured paths and any downstream components to create or validate storage locations as needed.
+
+## Admin API Endpoints
+
+The controller exposes a RESTful API on port 1610:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/datasets` | Dataset management |
+| `/jobs` | Job control and monitoring |
+| `/workers` | Worker status and health |
+| `/locations` | Storage locations |
+| `/providers` | Data source configuration |
+
+## Examples
+
+### Start Controller
+
+```bash
+ampd --config config.toml controller
+```
+
+Starts the controller with Admin API on port 1610.
+
+### Using Environment Variables
+
+```bash
+export AMP_CONFIG=config.toml
+ampd controller
+```
+
+### Custom Admin Port
+
+```toml
+# config.toml
+admin_addr = "0.0.0.0:8080"
+```
+
+```bash
+ampd --config config.toml controller
+```
+
+## Admin API Usage
+
+### List Datasets
+
+```bash
+curl http://localhost:1610/datasets
+```
+
+### Deploy a Dataset
+
+```bash
+curl -X POST http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/1.0.0/deploy
+```
+
+### List Jobs
+
+```bash
+curl http://localhost:1610/jobs
+```
+
+### Check Worker Status
+
+```bash
+# List all workers
+curl http://localhost:1610/workers
+
+# Check specific worker
+curl http://localhost:1610/workers/worker-01
+```
+
+### Create Extraction Job
+
+```bash
+curl -X POST http://localhost:1610/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset": "eth_mainnet",
+    "start_block": 0,
+    "end_block": 1000000
+  }'
+```
+
+### Stop a Job
+
+```bash
+curl -X POST http://localhost:1610/jobs/{job_id}/stop
+```
+
+## Deployment Patterns
+
+### Production Deployment
+
+In production, the controller runs independently from query servers:
+
+```bash
+# Terminal 1: Controller (Admin API)
+ampd --config config.toml controller &
+
+# Terminal 2: Query Server
+ampd --config config.toml server &
+
+# Terminal 3+: Workers
+ampd --config config.toml worker --node-id worker-01 &
+ampd --config config.toml worker --node-id worker-02 &
+```
+
+Benefits:
+- Independent scaling of admin operations
+- Fault isolation between components
+- Separate resource allocation
+
+### Development
+
+For local development, use [solo mode](/cli/ampd/solo) which includes the controller:
+
+```bash
+ampd solo
+```
+
+## Health Monitoring
+
+### Check Controller Health
+
+```bash
+curl http://localhost:1610/health
+```
+
+### Monitor Worker Heartbeats
+
+The controller tracks worker heartbeats and marks workers as unhealthy if heartbeats stop:
+
+```bash
+# View worker health status
+curl http://localhost:1610/workers | jq '.[] | {id, status, last_heartbeat}'
+```
+
+## Job Scheduling
+
+The controller orchestrates extraction jobs:
+
+1. **Receive job request** via Admin API
+2. **Resolve dependencies** between datasets
+3. **Divide work** into block ranges
+4. **Assign jobs** to available workers via LISTEN/NOTIFY
+5. **Track progress** through worker updates
+6. **Handle failures** with automatic retry logic
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Controller shut down gracefully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during controller operation or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd overview](/cli/ampd/overview) - Command overview and global options
+- [ampd worker](/cli/ampd/worker) - Worker coordination and job execution
+- [ampd solo](/cli/ampd/solo) - Development mode with embedded controller

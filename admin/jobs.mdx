@@ -1,0 +1,366 @@
+---
+title: Job Management
+description: Monitor, control, and manage extraction jobs
+---
+
+Job management provides operational control over extraction jobs that sync blockchain data. Operators can list jobs with pagination, inspect job details, monitor sync progress, stop running jobs, and clean up completed jobs.
+
+## Key Concepts
+
+<Card title="Job" icon="briefcase">
+  An extraction task that syncs blockchain data for a dataset, executed by a worker node
+</Card>
+
+**Job States:**
+- **Scheduled** - Job is queued, waiting for worker assignment
+- **Running** - Job is actively syncing blockchain data
+- **StopRequested** - Stop signal sent, worker finishing current work
+- **Stopping** - Worker is shutting down the job
+- **Completed** - Job finished successfully (terminal state)
+- **Stopped** - Job was stopped by operator (terminal state)
+- **Failed** - Job encountered an error (terminal state)
+
+**Terminal States:**
+Jobs in terminal states (Completed, Stopped, Failed) can be safely removed from the system.
+
+## Core Operations
+
+<CardGroup cols={2}>
+  <Card title="List Jobs" icon="list">
+    View active and historical jobs with pagination
+  </Card>
+  <Card title="Inspect Job" icon="magnifying-glass">
+    Get detailed job status and configuration
+  </Card>
+  <Card title="Monitor Progress" icon="chart-line">
+    Track sync state and block numbers
+  </Card>
+  <Card title="Stop Job" icon="stop">
+    Gracefully terminate running jobs
+  </Card>
+</CardGroup>
+
+## List Jobs
+
+View jobs with pagination support (default limit: 50):
+
+<CodeGroup>
+```bash CLI
+# List first 50 jobs (default)
+ampctl job list
+ampctl job ls  # alias
+
+# List first 100 jobs
+ampctl job list --limit 100
+
+# Paginate - get next 50 jobs after ID 1234
+ampctl job list --after 1234
+
+# Filter by status (default: "active" - non-terminal jobs)
+ampctl job list --status all
+ampctl job list --status scheduled,running
+ampctl job list -s completed
+
+# Short aliases
+ampctl job list -l 20 -a 500
+
+# JSON output
+ampctl job list --json
+```
+
+```bash API
+# List first 50 jobs
+curl http://localhost:1610/jobs
+
+# List with limit
+curl http://localhost:1610/jobs?limit=100
+
+# Paginate with cursor
+curl http://localhost:1610/jobs?limit=50&last_job_id=1234
+
+# Filter by status
+curl http://localhost:1610/jobs?status=all
+curl http://localhost:1610/jobs?status=scheduled,running
+curl http://localhost:1610/jobs?status=completed
+```
+</CodeGroup>
+
+**Response:**
+```json
+{
+  "jobs": [
+    {
+      "id": 12345,
+      "status": "RUNNING",
+      "dataset": {
+        "namespace": "ethereum",
+        "name": "mainnet",
+        "version": "1.0.0"
+      },
+      "manifest_hash": "abc123...",
+      "worker_id": "worker-01",
+      "created_at": "2026-03-04T10:00:00Z",
+      "updated_at": "2026-03-04T11:30:00Z"
+    }
+  ],
+  "next_cursor": 12346
+}
+```
+
+**Status Filters:**
+- `active` (default) - Shows non-terminal jobs (Scheduled, Running, StopRequested, Stopping)
+- `all` - Shows all jobs including terminal states
+- Comma-separated values - `scheduled,running,completed,stopped,error`
+
+## Inspect a Job
+
+Get detailed information about a specific job:
+
+<CodeGroup>
+```bash CLI
+# Inspect by job ID
+ampctl job inspect 12345
+ampctl job get 12345  # alias
+
+# Extract specific fields
+ampctl job inspect 12345 | jq '.status'
+ampctl job inspect 12345 --json
+```
+
+```bash API
+# Get job details
+curl http://localhost:1610/jobs/12345
+```
+</CodeGroup>
+
+**Response:**
+```json
+{
+  "id": 12345,
+  "status": "RUNNING",
+  "dataset": {
+    "namespace": "ethereum",
+    "name": "mainnet",
+    "version": "1.0.0"
+  },
+  "manifest_hash": "abc123...",
+  "worker_id": "worker-01",
+  "end_block": null,
+  "parallelism": 1,
+  "created_at": "2026-03-04T10:00:00Z",
+  "updated_at": "2026-03-04T11:30:00Z"
+}
+```
+
+## Monitor Job Progress
+
+View sync progress for all tables written by a job:
+
+<CodeGroup>
+```bash CLI
+# Get job progress
+ampctl job progress 123
+
+# JSON output for scripting
+ampctl job progress 123 --json
+```
+
+```bash API
+# Get progress via API
+curl http://localhost:1610/jobs/123/progress
+
+# Extract specific metrics with jq
+curl http://localhost:1610/jobs/123/progress | jq '.tables["blocks"].current_block'
+```
+</CodeGroup>
+
+**Response:**
+```json
+{
+  "job_id": 123,
+  "job_status": "RUNNING",
+  "tables": {
+    "blocks": {
+      "current_block": 21500000,
+      "start_block": 0,
+      "files_count": 1247,
+      "total_size_bytes": 137970286592
+    },
+    "transactions": {
+      "current_block": 21499850,
+      "start_block": 0,
+      "files_count": 3891,
+      "total_size_bytes": 549957091328
+    }
+  }
+}
+```
+
+**Progress Fields:**
+- `current_block` - Highest block in contiguous synced range
+- `start_block` - Lowest block in synced range
+- `files_count` - Number of Parquet files written
+- `total_size_bytes` - Total data size in bytes
+
+<Note>
+The `current_block` represents the highest block in the **contiguous synced range**. Gaps in the canonical chain are excluded to ensure accurate, queryable data.
+</Note>
+
+## Stop a Job
+
+Request graceful termination of a running job:
+
+<CodeGroup>
+```bash CLI
+# Stop a job
+ampctl job stop 12345
+
+# Verify job stopped
+ampctl job inspect 12345
+```
+
+```bash API
+# Stop job via API
+curl -X PUT http://localhost:1610/jobs/12345/stop
+```
+</CodeGroup>
+
+**Behavior:**
+- Worker finishes current operations before stopping
+- Job transitions: `Running` → `StopRequested` → `Stopping` → `Stopped`
+- Idempotent: stopping an already stopped job returns success
+- Verify completion with `ampctl job inspect`
+
+## Remove a Job
+
+Delete a job in a terminal state:
+
+<CodeGroup>
+```bash CLI
+# Remove by job ID
+ampctl job rm 123
+ampctl job remove 456  # alias
+```
+
+```bash API
+# Delete job via API
+curl -X DELETE http://localhost:1610/jobs/123
+```
+</CodeGroup>
+
+**Safety:**
+- Only jobs in terminal states (Completed, Stopped, Failed) can be removed
+- Running jobs must be stopped first
+- Returns 409 Conflict if job is not in terminal state
+- Idempotent: deleting non-existent job returns success (204)
+
+## Prune Terminal Jobs
+
+Bulk-remove jobs by status filter:
+
+<CodeGroup>
+```bash CLI
+# Prune all terminal jobs (completed, stopped, error)
+ampctl job prune
+
+# Prune only completed jobs
+ampctl job prune --status completed
+
+# Prune only failed jobs
+ampctl job prune --status error
+
+# Prune only stopped jobs
+ampctl job prune --status stopped
+```
+
+```bash API
+# Prune all terminal jobs
+curl -X DELETE http://localhost:1610/jobs?status=terminal
+
+# Prune by specific status
+curl -X DELETE http://localhost:1610/jobs?status=completed
+curl -X DELETE http://localhost:1610/jobs?status=error
+curl -X DELETE http://localhost:1610/jobs?status=stopped
+```
+</CodeGroup>
+
+**Use cases:**
+- Periodic cleanup of completed jobs
+- Administrative maintenance
+- Freeing up database storage
+
+## Scripting Examples
+
+### Find Running Jobs for Dataset
+
+```bash
+# Find all running jobs for ethereum/mainnet
+ampctl job list --json | jq '.jobs[] | 
+  select(.status == "RUNNING" and .dataset.name == "mainnet")'
+```
+
+### Monitor Progress Continuously
+
+```bash
+# Watch job progress in real-time
+watch -n 5 'ampctl job progress 123'
+```
+
+### Alert on Failed Jobs
+
+```bash
+#!/bin/bash
+# Check for failed jobs
+failed=$(ampctl job list --status error --json | jq '.jobs | length')
+
+if [ $failed -gt 0 ]; then
+  echo "ALERT: $failed failed jobs detected"
+  ampctl job list --status error
+fi
+```
+
+### Clean Up Old Completed Jobs
+
+```bash
+# Remove all completed jobs older than 7 days
+ampctl job prune --status completed
+```
+
+## API Reference
+
+Job management endpoints:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/jobs` | GET | List jobs with pagination |
+| `/jobs` | DELETE | Prune jobs by status filter |
+| `/jobs/{id}` | GET | Get job details |
+| `/jobs/{id}` | DELETE | Remove a job |
+| `/jobs/{id}/stop` | PUT | Stop a running job |
+| `/jobs/{id}/progress` | GET | Get job progress |
+
+**Query Parameters for `/jobs` GET:**
+- `limit` - Maximum jobs to return (default: 50, max: 1000)
+- `last_job_id` - Cursor for pagination
+- `status` - Status filter (`active`, `all`, or comma-separated values)
+
+**Query Parameters for `/jobs` DELETE:**
+- `status` - Required filter (`terminal`, `completed`, `stopped`, `error`)
+
+<Note>
+For complete API schemas, see the [Admin API OpenAPI specification](/api/admin/overview).
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Dataset Management" icon="database" href="/admin/datasets">
+    Deploy datasets to create jobs
+  </Card>
+  <Card title="Worker Management" icon="server" href="/admin/workers">
+    Monitor workers executing jobs
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/admin/monitoring">
+    Set up job progress monitoring
+  </Card>
+</CardGroup>

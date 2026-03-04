@@ -1,0 +1,779 @@
+---
+title: "Production Deployment"
+description: "Best practices, checklist, and guidance for production deployments"
+---
+
+This guide covers best practices for deploying Amp in production environments, including high availability setup, monitoring, security, backup strategies, and performance tuning.
+
+<Warning>
+  **Never use solo mode in production.** Always use distributed mode with separate server, worker, and controller components.
+</Warning>
+
+## Production Deployment Checklist
+
+Use this checklist to ensure your production deployment is complete:
+
+<Steps>
+  <Step title="Infrastructure">
+    <Check>PostgreSQL database with adequate resources</Check>
+    <Check>Object storage configured (S3, GCS, Azure Blob, or local filesystem)</Check>
+    <Check>Network connectivity between all components</Check>
+    <Check>Load balancers for server instances</Check>
+  </Step>
+  
+  <Step title="Security">
+    <Check>Controller deployed in private network</Check>
+    <Check>Database credentials in secrets manager</Check>
+    <Check>Object store credentials secured</Check>
+    <Check>TLS/SSL configured for all endpoints</Check>
+    <Check>Firewall rules limiting access</Check>
+  </Step>
+  
+  <Step title="High Availability">
+    <Check>Multiple server instances behind load balancer</Check>
+    <Check>Multiple worker instances for failover</Check>
+    <Check>PostgreSQL replication configured</Check>
+    <Check>Object store with redundancy</Check>
+  </Step>
+  
+  <Step title="Monitoring">
+    <Check>OpenTelemetry tracing configured</Check>
+    <Check>Metrics collection enabled</Check>
+    <Check>Alerting rules configured</Check>
+    <Check>Log aggregation setup</Check>
+  </Step>
+  
+  <Step title="Performance">
+    <Check>Compaction enabled in configuration</Check>
+    <Check>Garbage collection active</Check>
+    <Check>Memory limits configured</Check>
+    <Check>Database connection pool sized appropriately</Check>
+  </Step>
+  
+  <Step title="Operational">
+    <Check>Backup strategy implemented</Check>
+    <Check>Disaster recovery plan documented</Check>
+    <Check>Runbooks created</Check>
+    <Check>On-call rotation established</Check>
+  </Step>
+</Steps>
+
+## Architecture for High Availability
+
+### Recommended Production Topology
+
+```
+                    ┌─────────────────┐
+                    │  Load Balancer  │
+                    │  (Flight/JSONL) │
+                    └────────┬────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+    ┌─────▼─────┐     ┌─────▼─────┐     ┌─────▼─────┐
+    │Server (1) │     │Server (2) │     │Server (3) │
+    │1602, 1603 │     │1602, 1603 │     │1602, 1603 │
+    └───────────┘     └───────────┘     └───────────┘
+
+    ┌──────────────────────────────────────────────┐
+    │           Controller (Private)               │
+    │              Port 1610                       │
+    └──────────────────────────────────────────────┘
+
+    ┌───────────┐     ┌───────────┐     ┌───────────┐
+    │Worker (1) │     │Worker (2) │     │Worker (3) │
+    │           │     │           │     │           │
+    └───────────┘     └───────────┘     └───────────┘
+
+         ┌────────────────────────────────┐
+         │   PostgreSQL (Primary)         │
+         │   + Read Replicas (optional)   │
+         └────────────────────────────────┘
+
+         ┌────────────────────────────────┐
+         │   Object Store (S3/GCS/Azure)  │
+         │   Multi-region replication     │
+         └────────────────────────────────┘
+```
+
+## Security Best Practices
+
+### Network Isolation
+
+<AccordionGroup>
+  <Accordion title="Controller Security (Port 1610)">
+    The controller provides administrative capabilities and **must** be secured:
+    
+    - **Deploy in private network only**
+    - **Never expose to public internet**
+    - Use VPN or bastion host for access
+    - Restrict source IPs via firewall rules
+    - Place in management/admin subnet
+    
+    Example AWS Security Group:
+    ```hcl
+    resource "aws_security_group" "controller" {
+      ingress {
+        from_port   = 1610
+        to_port     = 1610
+        protocol    = "tcp"
+        cidr_blocks = ["10.0.0.0/8"]  # Internal only
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Server Security (Ports 1602, 1603)">
+    Query servers can be public-facing but need protection:
+    
+    - Deploy in public subnet/DMZ if needed
+    - Implement rate limiting
+    - Use read-only database credentials
+    - Configure query timeouts
+    - Monitor for abuse
+    
+    Consider adding authentication via:
+    - API Gateway (Kong, Nginx, Traefik)
+    - Mutual TLS (mTLS)
+    - JWT token validation
+  </Accordion>
+  
+  <Accordion title="Worker Security (No Exposed Ports)">
+    Workers are internal components:
+    
+    - Deploy in private subnet
+    - Only outbound connections needed
+    - Require database write access
+    - Need object store write access
+    - No public IP addresses required
+  </Accordion>
+</AccordionGroup>
+
+### Secrets Management
+
+**Never commit secrets to version control.** Use a secrets management system:
+
+<Tabs>
+  <Tab title="Kubernetes">
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: amp-secrets
+    type: Opaque
+    data:
+      db-url: <base64-encoded-url>
+      aws-secret-key: <base64-encoded-key>
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: amp-worker
+    spec:
+      template:
+        spec:
+          containers:
+          - name: worker
+            env:
+            - name: AMP_CONFIG_METADATA_DB__URL
+              valueFrom:
+                secretKeyRef:
+                  name: amp-secrets
+                  key: db-url
+    ```
+  </Tab>
+  
+  <Tab title="AWS Secrets Manager">
+    ```bash
+    # Store secret
+    aws secretsmanager create-secret \
+      --name amp/database-url \
+      --secret-string "postgresql://user:password@host:5432/amp"
+    
+    # Retrieve in startup script
+    export AMP_CONFIG_METADATA_DB__URL=$(
+      aws secretsmanager get-secret-value \
+        --secret-id amp/database-url \
+        --query SecretString \
+        --output text
+    )
+    
+    ampd worker --config config.toml --node-id worker-01
+    ```
+  </Tab>
+  
+  <Tab title="HashiCorp Vault">
+    ```bash
+    # Store secret
+    vault kv put secret/amp/database \
+      url="postgresql://user:password@host:5432/amp"
+    
+    # Retrieve in startup script
+    export AMP_CONFIG_METADATA_DB__URL=$(
+      vault kv get -field=url secret/amp/database
+    )
+    
+    ampd worker --config config.toml --node-id worker-01
+    ```
+  </Tab>
+</Tabs>
+
+### TLS/SSL Configuration
+
+Secure all network communication:
+
+```toml
+# config.toml
+
+# PostgreSQL with SSL
+[metadata_db]
+url = "postgresql://user:password@host:5432/amp?sslmode=require"
+
+# For object store (S3)
+# AWS SDK uses TLS by default
+```
+
+For query endpoints, terminate TLS at load balancer or reverse proxy:
+
+```nginx
+# Nginx reverse proxy for Flight server
+upstream amp_flight {
+    server amp-server-1:1602;
+    server amp-server-2:1602;
+    server amp-server-3:1602;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name flight.example.com;
+    
+    ssl_certificate /etc/ssl/certs/flight.crt;
+    ssl_certificate_key /etc/ssl/private/flight.key;
+    
+    location / {
+        grpc_pass grpc://amp_flight;
+    }
+}
+```
+
+## High Availability Setup
+
+### Component Redundancy
+
+| Component | Min Instances | Recommended | Notes |
+|-----------|--------------|-------------|--------|
+| **Server** | 2 | 3+ | Behind load balancer |
+| **Controller** | 1 | 1-2 | Active-passive or active-active |
+| **Worker** | 2 | 3+ | For job failover |
+| **PostgreSQL** | 1 | 1 primary + 2 replicas | With automatic failover |
+
+### PostgreSQL High Availability
+
+Use managed PostgreSQL with HA features or set up replication:
+
+<Tabs>
+  <Tab title="AWS RDS">
+    ```hcl
+    resource "aws_db_instance" "amp" {
+      identifier     = "amp-postgres"
+      engine         = "postgres"
+      engine_version = "15.4"
+      instance_class = "db.r6g.2xlarge"
+      
+      multi_az               = true  # High availability
+      backup_retention_period = 7
+      backup_window          = "03:00-04:00"
+      maintenance_window     = "sun:04:00-sun:05:00"
+      
+      allocated_storage     = 500
+      storage_type         = "gp3"
+      storage_encrypted    = true
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Self-Managed">
+    Use PostgreSQL streaming replication:
+    
+    ```ini
+    # postgresql.conf (primary)
+    wal_level = replica
+    max_wal_senders = 3
+    wal_keep_size = 1GB
+    
+    # pg_hba.conf (primary)
+    host replication replicator 10.0.0.0/8 md5
+    ```
+    
+    Setup failover with tools like:
+    - Patroni
+    - Stolon
+    - pg_auto_failover
+  </Tab>
+</Tabs>
+
+### Object Store Redundancy
+
+Configure multi-region replication:
+
+<Tabs>
+  <Tab title="AWS S3">
+    ```hcl
+    resource "aws_s3_bucket" "amp_data" {
+      bucket = "amp-production-data"
+    }
+    
+    resource "aws_s3_bucket_versioning" "amp_data" {
+      bucket = aws_s3_bucket.amp_data.id
+      
+      versioning_configuration {
+        status = "Enabled"
+      }
+    }
+    
+    resource "aws_s3_bucket_replication_configuration" "amp_data" {
+      bucket = aws_s3_bucket.amp_data.id
+      role   = aws_iam_role.replication.arn
+      
+      rule {
+        id     = "replicate-all"
+        status = "Enabled"
+        
+        destination {
+          bucket        = aws_s3_bucket.amp_data_backup.arn
+          storage_class = "STANDARD_IA"
+        }
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="GCS">
+    ```bash
+    # Enable versioning
+    gcloud storage buckets update gs://amp-production-data \
+      --versioning
+    
+    # Setup dual-region bucket
+    gcloud storage buckets create gs://amp-production-data \
+      --location=us \
+      --storage-class=STANDARD
+    ```
+  </Tab>
+</Tabs>
+
+## Monitoring and Alerting
+
+### OpenTelemetry Configuration
+
+Enable comprehensive observability:
+
+```toml
+# config.toml
+[opentelemetry]
+trace_url = "http://otel-collector:4318/v1/traces"
+metrics_url = "http://otel-collector:4318/v1/metrics"
+trace_ratio = 1.0
+metrics_export_interval_secs = 60.0
+```
+
+### Key Metrics to Monitor
+
+<AccordionGroup>
+  <Accordion title="System Metrics">
+    - **CPU Usage**: Per component (server, worker, controller)
+    - **Memory Usage**: Track against configured limits
+    - **Disk I/O**: Object store and database throughput
+    - **Network**: Bandwidth usage and latency
+  </Accordion>
+  
+  <Accordion title="Worker Metrics">
+    - **Active Jobs**: Number of extraction jobs running
+    - **Job Duration**: Time to complete jobs
+    - **Block Processing Rate**: Blocks extracted per second
+    - **Worker Heartbeat**: Health signal frequency
+    - **Failed Jobs**: Job failure rate and reasons
+  </Accordion>
+  
+  <Accordion title="Query Metrics">
+    - **Query Latency**: P50, P95, P99 response times
+    - **Query Throughput**: Queries per second
+    - **Active Connections**: Current query connections
+    - **Error Rate**: Failed queries percentage
+  </Accordion>
+  
+  <Accordion title="Database Metrics">
+    - **Connection Pool**: Active/idle connections
+    - **Query Performance**: Slow query log
+    - **Replication Lag**: For read replicas
+    - **Disk Usage**: Database size growth
+  </Accordion>
+  
+  <Accordion title="Object Store Metrics">
+    - **File Count**: Parquet files stored
+    - **Storage Size**: Total data volume
+    - **Write Throughput**: Bytes written per second
+    - **Read Throughput**: Query read performance
+  </Accordion>
+</AccordionGroup>
+
+### Alert Rules
+
+Configure alerts for critical conditions:
+
+```yaml
+# Prometheus alert rules
+groups:
+  - name: amp_alerts
+    rules:
+      # Worker health
+      - alert: WorkerDown
+        expr: up{job="amp-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker {{ $labels.instance }} is down"
+      
+      # Job failures
+      - alert: HighJobFailureRate
+        expr: rate(amp_job_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High job failure rate detected"
+      
+      # Query latency
+      - alert: HighQueryLatency
+        expr: histogram_quantile(0.95, rate(amp_query_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "95th percentile query latency above 10s"
+      
+      # Database connections
+      - alert: DatabaseConnectionPoolExhausted
+        expr: amp_db_connections_active / amp_db_connections_max > 0.9
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+```
+
+## Backup and Recovery
+
+### Backup Strategy
+
+<Steps>
+  <Step title="PostgreSQL Backups">
+    **Frequency**: Daily full backups + continuous WAL archiving
+    
+    ```bash
+    # Automated backup with pg_dump
+    pg_dump -h db-host -U amp_user -F c -f amp-backup-$(date +%Y%m%d).dump amp
+    
+    # Upload to S3
+    aws s3 cp amp-backup-$(date +%Y%m%d).dump s3://amp-backups/postgres/
+    ```
+    
+    **Retention**: 30 days for daily, 12 months for monthly
+  </Step>
+  
+  <Step title="Object Store Backups">
+    Parquet files in object store are immutable and versioned:
+    
+    - Enable versioning on S3/GCS bucket
+    - Configure lifecycle policies for old versions
+    - Use cross-region replication for disaster recovery
+    
+    ```bash
+    # S3 lifecycle policy
+    aws s3api put-bucket-lifecycle-configuration \
+      --bucket amp-production-data \
+      --lifecycle-configuration file://lifecycle.json
+    ```
+  </Step>
+  
+  <Step title="Configuration Backups">
+    Store configuration in version control:
+    
+    - config.toml files
+    - Provider configurations
+    - Dataset manifests
+    
+    Exclude sensitive values (use environment variables).
+  </Step>
+</Steps>
+
+### Disaster Recovery
+
+**Recovery Time Objective (RTO)**: Target recovery time
+
+**Recovery Point Objective (RPO)**: Acceptable data loss
+
+#### Recovery Procedures
+
+<Tabs>
+  <Tab title="Database Failure">
+    1. Identify failure (primary database down)
+    2. Promote read replica to primary (if using HA setup)
+    3. Update connection strings to new primary
+    4. Restart all Amp components to reconnect
+    5. Verify worker heartbeats and job resumption
+    
+    ```bash
+    # Update config for new database
+    export AMP_CONFIG_METADATA_DB__URL="postgresql://new-primary:5432/amp"
+    
+    # Restart components
+    systemctl restart amp-controller
+    systemctl restart amp-server
+    systemctl restart amp-worker@*
+    ```
+  </Tab>
+  
+  <Tab title="Object Store Failure">
+    1. Switch to backup region/bucket
+    2. Update configuration with new object store location
+    3. Verify data accessibility
+    4. Resume worker operations
+    
+    For S3:
+    ```bash
+    # Update to failover bucket
+    export AWS_S3_BUCKET="amp-data-backup-region"
+    ```
+  </Tab>
+  
+  <Tab title="Complete Region Failure">
+    1. Activate disaster recovery region
+    2. Restore PostgreSQL from backup
+    3. Point to replicated object store
+    4. Deploy Amp components in DR region
+    5. Update DNS to point to DR region
+    6. Verify all services operational
+  </Tab>
+</Tabs>
+
+## Performance Tuning
+
+### Configuration Optimization
+
+```toml
+# config.toml - Production optimized
+
+# Memory limits
+max_mem_mb = 16384          # 16GB global limit
+query_max_mem_mb = 4096     # 4GB per query
+spill_location = ["/tmp/amp-spill"]
+
+# Timing
+poll_interval_secs = 1.0
+microbatch_max_interval = 50000
+server_microbatch_max_interval = 1000
+keep_alive_interval = 60
+
+# Database
+[metadata_db]
+url = "postgresql://amp:password@db:5432/amp"
+pool_size = 20              # Increase for high concurrency
+auto_migrate = false        # Disable in production
+
+# Writer optimization
+[writer]
+compression = "zstd(3)"     # Higher compression for production
+bloom_filters = true        # Enable for better query performance
+cache_size_mb = 2048        # Larger metadata cache
+max_row_group_mb = 512
+segment_flush_interval_secs = 300.0
+
+# Compaction (essential for production)
+[writer.compactor]
+active = true
+metadata_concurrency = 4
+write_concurrency = 4
+min_interval = 1.0
+cooldown_duration = 512.0
+overflow = "1.2"
+bytes = 2147483648          # 2GB target
+
+# Garbage collection
+[writer.collector]
+active = true
+min_interval = 30.0
+deletion_lock_duration = 3600.0  # 1 hour
+```
+
+### PostgreSQL Tuning
+
+```sql
+-- postgresql.conf optimizations
+
+-- Memory
+shared_buffers = 8GB
+effective_cache_size = 24GB
+work_mem = 32MB
+maintenance_work_mem = 2GB
+
+-- Checkpoints
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+default_statistics_target = 100
+
+-- Query planner
+random_page_cost = 1.1
+effective_io_concurrency = 200
+
+-- Connections
+max_connections = 200
+```
+
+### Load Testing
+
+Test your deployment before going live:
+
+```bash
+# Query load test with Apache Bench
+ab -n 10000 -c 50 -p query.json \
+  -T application/json \
+  http://localhost:1603/
+
+# Worker stress test - deploy multiple datasets
+for i in {1..10}; do
+  curl -X POST http://localhost:1610/datasets/test/dataset-$i/versions/1.0.0/deploy
+done
+
+# Monitor metrics during load
+curl http://localhost:1610/metrics
+```
+
+## Operational Runbooks
+
+### Common Operations
+
+<AccordionGroup>
+  <Accordion title="Adding a Worker">
+    1. Deploy new worker instance with unique node ID
+    2. Ensure connectivity to database and object store
+    3. Start worker process
+    4. Verify registration via Admin API
+    
+    ```bash
+    # Start new worker
+    ampd worker --config config.toml --node-id worker-new-01
+    
+    # Verify registration
+    curl http://localhost:1610/locations | jq '.[] | select(.node_id == "worker-new-01")'
+    ```
+  </Accordion>
+  
+  <Accordion title="Removing a Worker">
+    1. Stop assigning new jobs (graceful shutdown)
+    2. Wait for current jobs to complete
+    3. Send SIGTERM to worker process
+    4. Verify deregistration
+    
+    ```bash
+    # Graceful shutdown
+    kill -TERM $(pidof ampd)
+    
+    # Verify worker removed
+    curl http://localhost:1610/locations
+    ```
+  </Accordion>
+  
+  <Accordion title="Scaling Query Servers">
+    1. Deploy additional server instances
+    2. Configure same backend (database + object store)
+    3. Add to load balancer pool
+    4. Verify health checks pass
+    
+    ```bash
+    # Start additional server
+    ampd server --config config.toml
+    
+    # Add to load balancer (example with HAProxy)
+    echo "server server4 10.0.1.14:1602 check" >> /etc/haproxy/haproxy.cfg
+    systemctl reload haproxy
+    ```
+  </Accordion>
+  
+  <Accordion title="Database Maintenance">
+    **During maintenance window:**
+    
+    1. Stop controller to prevent new jobs
+    2. Allow workers to complete current jobs
+    3. Perform database maintenance
+    4. Restart components
+    
+    ```bash
+    # Stop job scheduling
+    systemctl stop amp-controller
+    
+    # Wait for workers to finish
+    curl http://localhost:1610/jobs | jq '.[] | select(.status == "running")'
+    
+    # Perform maintenance
+    psql -h db-host -U postgres -c "VACUUM ANALYZE;"
+    
+    # Restart
+    systemctl start amp-controller
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Cost Optimization
+
+### Resource Right-Sizing
+
+| Component | CPU | Memory | Storage | Notes |
+|-----------|-----|--------|---------|--------|
+| **Server** | 4-8 cores | 8-16 GB | Minimal | Scale horizontally |
+| **Controller** | 2-4 cores | 4-8 GB | Minimal | Usually single instance |
+| **Worker** | 8-16 cores | 16-32 GB | Temp storage | Scale based on throughput |
+| **PostgreSQL** | 8-16 cores | 32-64 GB | 500GB-2TB | Critical for metadata |
+
+### Object Storage Optimization
+
+- Use lifecycle policies to move old data to cheaper tiers
+- Enable compression (already configured in writer)
+- Consider intelligent tiering for infrequently accessed data
+
+```json
+// S3 lifecycle policy
+{
+  "Rules": [
+    {
+      "Id": "MoveToIA",
+      "Status": "Enabled",
+      "Transitions": [
+        {
+          "Days": 90,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "Days": 365,
+          "StorageClass": "GLACIER"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Monitoring Setup" icon="chart-line" href="/observability/monitoring">
+    Configure comprehensive monitoring
+  </Card>
+  <Card title="Configuration Reference" icon="book" href="/configuration/overview">
+    Complete configuration options
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/troubleshooting/common-issues">
+    Resolve common production issues
+  </Card>
+</CardGroup>

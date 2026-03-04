@@ -1,80 +1,238 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get up and running with Amp in under 5 minutes"
 ---
 
-## Get started in three steps
+Get Amp querying blockchain data in under 5 minutes using solo mode with zero configuration.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+- Linux or macOS (Windows via WSL2)
+- Internet connection for downloading data
+- ~2GB free disk space for initial setup
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Quick Start
+
+<Steps>
+  <Step title="Install Amp">
+    Install Amp using the official version manager `ampup`:
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://ampup.sh/install | sh
+    ```
+
+    Restart your terminal or run:
+
+    ```bash
+    source ~/.zshenv  # or ~/.bashrc for bash
+    ```
+
+    Verify the installation:
+
+    ```bash
+    ampd --version
+    ```
+  </Step>
+
+  <Step title="Start Amp in solo mode">
+    Solo mode runs all components (server, worker, controller) in a single process with auto-managed PostgreSQL:
+
+    ```bash
+    ampd solo
+    ```
+
+    <Info>
+      Solo mode automatically creates and manages a PostgreSQL instance in `.amp/metadb/` — no manual database setup required!
+    </Info>
+
+    You should see output indicating the services are starting:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```
+    Starting Amp in solo mode...
+    PostgreSQL started at .amp/metadb/
+    Server listening on http://0.0.0.0:1603 (JSON Lines)
+    Server listening on http://0.0.0.0:1602 (Arrow Flight)
+    Admin API listening on http://0.0.0.0:1610
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Register an EVM RPC dataset">
+    Open a new terminal and register a dataset to extract Ethereum mainnet data:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    ampctl datasets register \
+      --namespace "quickstart" \
+      --name "eth_mainnet" \
+      --version "v1" \
+      --type "evm-rpc" \
+      --network "ethereum-mainnet"
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    <Note>
+      This creates a dataset definition but doesn't start extraction yet. You need to deploy it next.
+    </Note>
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Deploy the extraction job">
+    Deploy the dataset to start extracting blockchain data:
 
-### Step 3: Go live
+    ```bash
+    ampctl datasets deploy \
+      --namespace "quickstart" \
+      --name "eth_mainnet" \
+      --version "v1" \
+      --start-block 18000000 \
+      --end-block 18001000
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    This extracts blocks 18,000,000 through 18,001,000 (1,000 blocks). Check job progress:
 
-## Next steps
+    ```bash
+    ampctl jobs list
+    ```
 
-Now that you have your docs running, explore these key features:
+    Wait for the job status to show `Completed` (usually takes 1-2 minutes for 1,000 blocks).
+  </Step>
+
+  <Step title="Query the data">
+    Once extraction completes, query your data via the JSON Lines endpoint:
+
+    ```bash
+    curl -X POST http://localhost:1603 \
+      --data 'SELECT number, timestamp, hash FROM "quickstart/eth_mainnet".blocks LIMIT 5'
+    ```
+
+    You should see JSON Lines output with blockchain data:
+
+    ```json
+    {"number":18000000,"timestamp":1696291295,"hash":"0x123..."}
+    {"number":18000001,"timestamp":1696291307,"hash":"0x456..."}
+    ```
+
+    Try more complex queries:
+
+    ```bash
+    # Get recent transactions
+    curl -X POST http://localhost:1603 \
+      --data 'SELECT block_number, "from", "to", value 
+              FROM "quickstart/eth_mainnet".transactions 
+              LIMIT 10'
+
+    # Query logs
+    curl -X POST http://localhost:1603 \
+      --data 'SELECT block_number, address, topics 
+              FROM "quickstart/eth_mainnet".logs 
+              WHERE block_number >= 18000000 
+              LIMIT 10'
+    ```
+  </Step>
+</Steps>
+
+## Query via Arrow Flight (Python)
+
+For high-performance queries, use the Arrow Flight endpoint:
+
+```python
+import pyarrow.flight as flight
+
+# Connect to Arrow Flight server
+client = flight.FlightClient("grpc://localhost:1602")
+
+# Execute query
+query = 'SELECT * FROM "quickstart/eth_mainnet".blocks LIMIT 10'
+flight_info = client.get_flight_info(
+    flight.FlightDescriptor.for_command(query)
+)
+
+# Read results
+reader = client.do_get(flight_info.endpoints[0].ticket)
+table = reader.read_all()
+
+print(table.to_pandas())
+```
+
+## Available Tables
+
+Each dataset provides three tables:
+
+| Table | Description | Columns |
+|-------|-------------|---------|
+| `blocks` | Block headers | number, hash, parent_hash, timestamp, gas_used, gas_limit, ... |
+| `transactions` | Transactions | block_number, hash, from, to, value, gas, input, ... |
+| `logs` | Event logs | block_number, transaction_hash, address, topics, data, ... |
+
+## Built-in User-Defined Functions
+
+Amp includes EVM-specific UDFs for common operations:
+
+```sql
+-- Decode hex strings to integers
+SELECT evm_decode_hex('0x1234') as decoded;
+
+-- Convert between units (wei to ether)
+SELECT shift_units(value, -18) as value_eth 
+FROM "quickstart/eth_mainnet".transactions;
+
+-- Extract event topics
+SELECT evm_topic(topics, 0) as event_signature
+FROM "quickstart/eth_mainnet".logs;
+```
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Core Concepts" icon="cube" href="/concepts/architecture">
+    Learn about Amp's architecture and data flow
+  </Card>
+  <Card title="SQL Guide" icon="database" href="/querying/sql-basics">
+    Master SQL querying in Amp
+  </Card>
+  <Card title="Data Sources" icon="plug" href="/sources/overview">
+    Connect to Firehose, Solana, and more
+  </Card>
+  <Card title="Production Deployment" icon="server" href="/deployment/distributed-mode">
+    Deploy Amp in production
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Solo mode fails to start">
+    **Symptom**: `ampd solo` exits with PostgreSQL errors
+
+    **Solution**: Remove the existing PostgreSQL directory and try again:
+    ```bash
+    rm -rf .amp/metadb/
+    ampd solo
+    ```
+  </Accordion>
+
+  <Accordion title="Query returns no data">
+    **Symptom**: Queries run but return empty results
+
+    **Solution**: Check that the extraction job completed:
+    ```bash
+    ampctl jobs list
+    ```
+    
+    Wait for the status to show `Completed` before querying.
+  </Accordion>
+
+  <Accordion title="Connection refused on port 1603">
+    **Symptom**: `curl: (7) Failed to connect to localhost port 1603`
+
+    **Solution**: Ensure `ampd solo` is running in another terminal. Check the logs to confirm the server started successfully.
+  </Accordion>
+</AccordionGroup>
+
+## Clean Up
+
+To stop Amp and clean up:
+
+```bash
+# Stop ampd (Ctrl+C in the terminal running ampd solo)
+
+# Remove all data (optional)
+rm -rf .amp/
+```

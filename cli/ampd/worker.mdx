@@ -1,0 +1,181 @@
+---
+title: 'ampd worker'
+description: 'Run distributed worker node for blockchain data extraction'
+---
+
+## Synopsis
+
+```bash
+ampd --config <path> worker --node-id <id>
+```
+
+## Description
+
+Starts a worker node that connects to the metadata database and processes distributed dump tasks. The worker polls for available jobs and executes them. Multiple workers can run in parallel to process different portions of data extraction jobs.
+
+The node-id must be unique across all running workers. Workers require access to the metadata database configured in the config file and run continuously until terminated.
+
+## Options
+
+<ParamField path="--node-id" type="string" required>
+  The unique identifier for this worker node. Used to track worker status and job assignments in the distributed system.
+  
+  Can also be set via the `AMP_NODE_ID` environment variable.
+</ParamField>
+
+## Worker Coordination
+
+Workers operate in a coordination loop:
+
+1. **Register** with metadata database using node ID
+2. **Maintain heartbeat** every 1 second
+3. **Listen** for job notifications via PostgreSQL LISTEN/NOTIFY
+4. **Execute** assigned extraction jobs
+5. **Write** Parquet files to configured storage
+6. **Update** job status in database
+
+| Mechanism | Description |
+|-----------|-------------|
+| Heartbeat | 1-second interval health signal |
+| LISTEN/NOTIFY | PostgreSQL-based job notifications |
+| State Reconciliation | 60-second periodic state sync |
+| Graceful Resume | Jobs resume on worker restart |
+
+## Configuration
+
+Worker settings inherit from the main ampd configuration file. The metadata database URL must be configured:
+
+```toml
+[metadata_db]
+url = "postgresql://user:password@localhost/amp"
+```
+
+### Environment Variables
+
+```bash
+# Worker-specific
+export AMP_NODE_ID="worker-01"
+
+# Database connection
+export AMP_CONFIG_METADATA_DB_URL="postgresql://localhost/amp"
+```
+
+## Directory Configuration
+
+`ampd worker` requires `--config` (or `AMP_CONFIG`) to be provided, and `--node-id` is mandatory. Default `data`, `providers`, and `manifests` directory paths are resolved relative to the config file's parent directory only when the config file does not specify those paths.
+
+When the config file specifies `data_dir`, `providers_dir`, or `manifests_dir`, those values are used directly.
+
+This command does not create directories itself; it relies on the configured paths and any downstream components to create or validate storage locations as needed.
+
+## Examples
+
+### Single Worker
+
+```bash
+ampd --config config.toml worker --node-id worker-01
+```
+
+Starts a worker with unique node ID `worker-01`.
+
+### Multiple Workers (Parallel Processing)
+
+```bash
+# Terminal 1
+ampd --config config.toml worker --node-id worker-01 &
+
+# Terminal 2
+ampd --config config.toml worker --node-id worker-02 &
+
+# Terminal 3
+ampd --config config.toml worker --node-id worker-03 &
+```
+
+Runs three workers in parallel for distributed processing.
+
+### Using Environment Variables
+
+```bash
+export AMP_CONFIG=config.toml
+export AMP_NODE_ID=worker-02
+ampd worker
+```
+
+### Geographic Distribution
+
+```bash
+# EU region worker
+ampd --config config.toml worker --node-id eu-west-1a-worker
+
+# US region worker
+ampd --config config.toml worker --node-id us-east-1b-worker
+```
+
+Use descriptive node IDs for geographic distribution and monitoring.
+
+## Worker Operations
+
+### Job Assignment
+
+Workers receive job assignments through PostgreSQL LISTEN/NOTIFY. The controller assigns jobs based on:
+
+- Worker availability (heartbeat status)
+- Current workload
+- Job priority and dependencies
+
+### Data Extraction
+
+Workers execute extraction jobs by:
+
+1. Reading dataset manifests from the manifests directory
+2. Connecting to configured data sources (RPC, Firehose)
+3. Extracting blockchain data for assigned block ranges
+4. Writing Parquet files to the data directory
+5. Updating progress in the metadata database
+
+### Fault Tolerance
+
+- **Heartbeat Monitoring**: Workers send heartbeat every 1 second
+- **Job Resumption**: Jobs can resume from checkpoints on worker restart
+- **State Reconciliation**: Periodic sync every 60 seconds ensures consistency
+- **Graceful Shutdown**: Ctrl+C allows in-progress jobs to complete
+
+## Scaling Workers
+
+Horizontal scaling improves extraction throughput:
+
+- **Single worker**: Sequential block processing
+- **Multiple workers**: Parallel processing of block ranges
+- **Dynamic scaling**: Add/remove workers based on load
+
+<Note>
+Each worker must have a unique `--node-id`. Running multiple workers with the same ID will cause coordination failures.
+</Note>
+
+## Monitoring
+
+Check worker status through the Admin API:
+
+```bash
+# List all registered workers
+curl http://localhost:1610/workers
+
+# Check specific worker status
+curl http://localhost:1610/workers/worker-01
+```
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Worker shut down gracefully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during worker operation or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd overview](/cli/ampd/overview) - Command overview and global options
+- [ampd controller](/cli/ampd/controller) - Job scheduling and coordination
+- [ampd solo](/cli/ampd/solo) - Development mode with embedded worker

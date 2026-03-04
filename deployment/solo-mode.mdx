@@ -1,0 +1,362 @@
+---
+title: "Solo Mode"
+description: "All-in-one deployment for local development and testing"
+---
+
+Solo mode is Amp's single-node development mode that combines server, controller, and worker into a single process. It provides a simplified all-in-one deployment for local development, testing, and CI/CD pipelines.
+
+<Warning>
+  **Solo mode is not for production use.** It lacks fault isolation, resource separation, and horizontal scaling capabilities required for production deployments.
+</Warning>
+
+## What is Solo Mode?
+
+Solo mode runs all three ampd services in a single process:
+- **Query server** (Arrow Flight + JSON Lines)
+- **Controller** (Admin API)
+- **Embedded worker** (fixed node ID "worker")
+
+All components share the same metadata database connection and datastore, making it ideal for development but unsuitable for production.
+
+## Quick Start
+
+### Starting Solo Mode
+
+The simplest way to start Amp in solo mode:
+
+```bash
+ampd solo
+```
+
+This starts all services with default configuration:
+- Arrow Flight server on port **1602**
+- JSON Lines server on port **1603**
+- Admin API on port **1610**
+- Embedded worker with node ID "worker"
+
+### Configuration Discovery
+
+Solo mode supports optional configuration via `--config` flag or `AMP_CONFIG` environment variable:
+
+```bash
+# Using config file flag
+ampd solo --config /path/to/config.toml
+
+# Using environment variable
+export AMP_CONFIG=/path/to/config.toml
+ampd solo
+```
+
+If no config is provided, solo mode auto-discovers `.amp/config.toml` in the current directory and falls back to zero-config defaults.
+
+### Zero-Config PostgreSQL
+
+Solo mode includes automatic PostgreSQL management:
+
+- Automatically starts a managed PostgreSQL instance
+- Stores data in `.amp/metadb/`
+- No manual database setup required
+- Perfect for local development
+
+To use an external database instead:
+
+```toml
+# config.toml
+[metadata_db]
+url = "postgresql://user:password@localhost:5432/amp"
+```
+
+Or via environment variable:
+
+```bash
+export AMP_CONFIG_METADATA_DB__URL="postgresql://user:password@localhost:5432/amp"
+ampd solo
+```
+
+## Service Control
+
+By default, `ampd solo` starts all services. You can selectively enable only specific interfaces:
+
+### Enabling Specific Services
+
+```bash
+# Solo with only Arrow Flight queries (no JSONL, no Admin API)
+ampd solo --flight-server
+
+# Solo with Flight and Admin API (no JSONL)
+ampd solo --flight-server --admin-server
+
+# Solo with JSONL only (no Flight, no Admin API)
+ampd solo --jsonl-server
+```
+
+### Environment Variables
+
+Alternatively, use environment variables:
+
+```bash
+export AMP_FLIGHT_SERVER=true
+export AMP_JSONL_SERVER=true
+export AMP_ADMIN_SERVER=true
+ampd solo
+```
+
+<Info>
+  The embedded worker always runs regardless of service flags.
+</Info>
+
+## Complete Workflow Example
+
+Here's a complete example of using solo mode for local development:
+
+### 1. Start Solo Mode
+
+```bash
+ampd solo
+```
+
+You'll see output indicating all services started:
+
+```
+Starting Amp in solo mode...
+Arrow Flight server listening on 0.0.0.0:1602
+JSON Lines server listening on 0.0.0.0:1603
+Admin API listening on 0.0.0.0:1610
+Embedded worker 'worker' registered and ready
+```
+
+### 2. Schedule an Extraction Job
+
+Use the Admin API to deploy a dataset:
+
+```bash
+curl -X POST http://localhost:1610/datasets/my_namespace/eth_mainnet/versions/1.0.0/deploy \
+  -H "Content-Type: application/json" \
+  -d '{
+    "end_block": 1000000
+  }'
+```
+
+The embedded worker will immediately pick up and execute the job.
+
+### 3. Monitor Job Progress
+
+```bash
+# List all jobs
+curl http://localhost:1610/jobs
+
+# Get specific job status (replace 42 with actual job_id)
+curl http://localhost:1610/jobs/42
+```
+
+### 4. Query the Data
+
+As data is being extracted, you can query it:
+
+```bash
+# Query via JSON Lines
+curl -X POST http://localhost:1603 \
+  --data "SELECT COUNT(*) FROM 'my_namespace/eth_mainnet'.blocks"
+
+# Query via Arrow Flight (Python example)
+python <<EOF
+from pyarrow import flight
+
+client = flight.connect("grpc://localhost:1602")
+reader = client.do_get(
+    flight.Ticket("SELECT * FROM 'my_namespace/eth_mainnet'.blocks LIMIT 10")
+)
+table = reader.read_all()
+print(table.to_pandas())
+EOF
+```
+
+## Configuration Options
+
+Solo mode supports all standard Amp configuration options:
+
+### Sample Configuration File
+
+```toml
+# .amp/config.toml
+
+# Storage paths
+data_dir = "data"
+providers_dir = "providers"
+manifests_dir = "manifests"
+
+# Service addresses (optional - defaults shown)
+flight_addr = "0.0.0.0:1602"
+jsonl_addr = "0.0.0.0:1603"
+admin_addr = "0.0.0.0:1610"
+
+# Database (optional - uses managed PostgreSQL by default)
+[metadata_db]
+# url = "postgresql://user:password@localhost:5432/amp"
+auto_migrate = true
+
+# Performance tuning
+[writer]
+compression = "zstd(1)"
+max_row_group_mb = 512
+
+# Observability (optional)
+[opentelemetry]
+trace_url = "http://localhost:4318/v1/traces"
+metrics_url = "http://localhost:4318/v1/metrics"
+```
+
+## Service Ports
+
+| Service | Port | Protocol | Purpose |
+|---------|------|----------|----------|
+| Arrow Flight | 1602 | gRPC | High-performance queries |
+| JSON Lines | 1603 | HTTP | Simple query interface |
+| Admin API | 1610 | HTTP | Management operations |
+
+## When to Use Solo Mode
+
+<CardGroup cols={2}>
+  <Card title="Great For" icon="check">
+    - Local development with fast iteration
+    - Testing the full extract-query pipeline
+    - CI/CD pipelines
+    - Learning Amp's capabilities
+    - Rapid prototyping
+  </Card>
+  
+  <Card title="Not Suitable For" icon="xmark">
+    - Production deployments
+    - Resource isolation (queries vs extraction)
+    - Horizontal scaling of workers
+    - High availability requirements
+    - Independent component failure handling
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+  Solo mode has several limitations that make it unsuitable for production:
+</Warning>
+
+- **No Fault Isolation**: If the worker crashes, it brings down the query server and Admin API
+- **Resource Contention**: Extraction jobs compete with queries for CPU and memory
+- **Single Worker Only**: Cannot add more workers for horizontal scaling
+- **No High Availability**: Single point of failure
+- **Not Production-Ready**: Lacks robustness for production workloads
+
+## Development with Docker Compose
+
+For a complete local development environment with observability:
+
+```yaml
+# docker-compose.yaml
+version: '3.8'
+services:
+  # PostgreSQL (if not using managed PostgreSQL)
+  db:
+    image: postgres:alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=amp
+    ports:
+      - '5432:5432'
+
+  # Database explorer
+  adminer:
+    image: adminer
+    ports:
+      - 7402:8080
+
+  # Observability stack (Grafana + OTEL + Prometheus)
+  lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "3000:3000"  # Grafana UI
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+```
+
+Start the services:
+
+```bash
+# Start supporting services
+docker-compose up -d
+
+# Start Amp in solo mode with observability
+ampd solo --config config.toml
+```
+
+With observability configured:
+
+```toml
+# config.toml
+[opentelemetry]
+trace_url = "http://localhost:4318/v1/traces"
+metrics_url = "http://localhost:4318/v1/metrics"
+```
+
+View traces and metrics at http://localhost:3000 (Grafana)
+
+## Troubleshooting
+
+### Port Already in Use
+
+If you see port binding errors:
+
+```bash
+# Check what's using the port
+lsof -i :1602
+lsof -i :1603
+lsof -i :1610
+
+# Use different ports
+ampd solo --config config.toml
+```
+
+Configure different ports in `config.toml`:
+
+```toml
+flight_addr = "0.0.0.0:8602"
+jsonl_addr = "0.0.0.0:8603"
+admin_addr = "0.0.0.0:8610"
+```
+
+### Database Connection Issues
+
+If using an external PostgreSQL database:
+
+```bash
+# Test database connection
+psql postgresql://user:password@localhost:5432/amp
+
+# Run migrations manually if needed
+ampd migrate --config config.toml
+```
+
+### Worker Not Picking Up Jobs
+
+Check worker registration:
+
+```bash
+# List registered workers (locations)
+curl http://localhost:1610/locations
+```
+
+You should see the embedded worker with node ID "worker".
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Distributed Mode" icon="network-wired" href="/deployment/distributed-mode">
+    Learn about production-ready distributed deployments
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Explore all configuration options
+  </Card>
+  <Card title="Querying Data" icon="database" href="/querying/overview">
+    Learn how to query your extracted data
+  </Card>
+</CardGroup>

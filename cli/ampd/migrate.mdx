@@ -1,0 +1,250 @@
+---
+title: 'ampd migrate'
+description: 'Run database migrations on the metadata database'
+---
+
+## Synopsis
+
+```bash
+ampd --config <path> migrate
+```
+
+## Description
+
+Executes database schema migrations on the PostgreSQL metadata database. This command requires the `--config` parameter to be set, which should point to a configuration file containing the metadata database connection details.
+
+Migrations are applied automatically and cannot be rolled back through this command. The command runs to completion and exits (unlike other ampd subcommands that run continuously).
+
+## Key Concepts
+
+<AccordionGroup>
+  <Accordion title="Metadata Database" icon="database">
+    PostgreSQL database storing job state, worker registrations, dataset definitions, and table revisions. Required for all ampd operational modes.
+  </Accordion>
+  
+  <Accordion title="Schema Migration" icon="arrow-up">
+    Automatic application of pending DDL changes to bring the database schema up to date with the current ampd version.
+  </Accordion>
+  
+  <Accordion title="One-Shot Command" icon="bolt">
+    Unlike other ampd subcommands, `migrate` runs to completion and exits. It does not run continuously.
+  </Accordion>
+</AccordionGroup>
+
+## Configuration
+
+The command requires a valid metadata database URL in the configuration file:
+
+```toml
+[metadata_db]
+url = "postgresql://user:password@localhost/amp"
+```
+
+### Configuration Fields
+
+<ParamField path="metadata_db.url" type="string" required>
+  PostgreSQL connection string for the metadata database.
+  
+  Can also be set via the `AMP_CONFIG_METADATA_DB__URL` environment variable.
+</ParamField>
+
+### Environment Override
+
+```bash
+export AMP_CONFIG_METADATA_DB__URL="postgresql://user:password@localhost/amp"
+```
+
+## When to Run Migrations
+
+<Steps>
+  <Step title="Initial Setup">
+    Before starting any ampd service for the first time:
+    
+    ```bash
+    ampd --config config.toml migrate
+    ```
+  </Step>
+  
+  <Step title="After Upgrades">
+    When a new ampd version includes schema changes:
+    
+    ```bash
+    # After upgrading ampd binary
+    ampd --config config.toml migrate
+    ```
+  </Step>
+  
+  <Step title="CI/CD Pipelines">
+    As a pre-deployment step in automated deployments:
+    
+    ```bash
+    # In deployment script
+    ampd --config config.toml migrate
+    ampd --config config.toml server &
+    ```
+  </Step>
+</Steps>
+
+## Examples
+
+### Basic Usage
+
+```bash
+ampd --config .amp/config.toml migrate
+```
+
+Apply pending migrations using the specified configuration file.
+
+### Using Environment Variable
+
+```bash
+export AMP_CONFIG=.amp/config.toml
+ampd migrate
+```
+
+### Remote Database
+
+```toml
+# config.toml
+[metadata_db]
+url = "postgresql://user:password@db.example.com:5432/amp_production"
+```
+
+```bash
+ampd --config config.toml migrate
+```
+
+### CI/CD Pipeline Example
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+set -e
+
+# Run migrations first
+ampd --config config.toml migrate
+
+# Then start services
+ampd --config config.toml controller &
+ampd --config config.toml server &
+ampd --config config.toml worker --node-id worker-01 &
+```
+
+## Auto-Migration Alternative
+
+In non-production environments, you can enable automatic migrations on service startup:
+
+```toml
+[metadata_db]
+url = "postgresql://localhost/amp"
+auto_migrate = true
+```
+
+When `auto_migrate = true`, services automatically apply migrations on startup, making the explicit `migrate` command unnecessary.
+
+<Note>
+**Solo mode defaults**: In solo mode, `auto_migrate` defaults to `true` for convenience.
+</Note>
+
+### When to Use Auto-Migration
+
+<AccordionGroup>
+  <Accordion title="Use Auto-Migration For" icon="check">
+    - Local development with solo mode
+    - Testing environments
+    - CI/CD ephemeral databases
+    - Quick prototyping
+  </Accordion>
+  
+  <Accordion title="Do NOT Use Auto-Migration For" icon="xmark">
+    - Production deployments (explicit control preferred)
+    - Shared staging environments
+    - Long-running production databases
+    - Scenarios requiring migration approval
+  </Accordion>
+</AccordionGroup>
+
+## Migration Safety
+
+### Idempotent Operations
+
+Migrations are idempotent - running `migrate` multiple times is safe:
+
+```bash
+# Safe to run multiple times
+ampd --config config.toml migrate
+ampd --config config.toml migrate
+ampd --config config.toml migrate
+```
+
+Already-applied migrations are skipped automatically.
+
+### Version Tracking
+
+The metadata database tracks which migrations have been applied. This information is stored in the schema migrations table.
+
+### Rollback
+
+Migrations cannot be rolled back through the `migrate` command. If you need to revert schema changes:
+
+1. Restore from a database backup
+2. Or manually reverse the schema changes using SQL
+
+<Warning>
+**Important**: Always backup your metadata database before running migrations in production.
+</Warning>
+
+## Troubleshooting
+
+### Connection Failed
+
+```bash
+Error: failed to connect to metadata database
+```
+
+**Solution**: Verify the database URL in your config file and ensure PostgreSQL is running:
+
+```bash
+# Test connection
+psql "postgresql://user:password@localhost/amp"
+```
+
+### Permission Denied
+
+```bash
+Error: permission denied to create table
+```
+
+**Solution**: Ensure the database user has DDL permissions:
+
+```sql
+-- Grant necessary permissions
+GRANT CREATE ON DATABASE amp TO amp_user;
+GRANT ALL ON SCHEMA public TO amp_user;
+```
+
+### Migration Conflict
+
+```bash
+Error: migration checksum mismatch
+```
+
+**Solution**: This indicates the migration files have changed. Either:
+- Restore the original migration files
+- Or reset the database and re-run all migrations
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Migrations completed successfully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during migration or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd overview](/cli/ampd/overview) - Command overview and global options
+- [ampd solo](/cli/ampd/solo) - Solo mode with auto-migration enabled

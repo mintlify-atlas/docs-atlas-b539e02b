@@ -1,0 +1,386 @@
+---
+title: EVM RPC Provider
+description: Configure Ethereum-compatible JSON-RPC endpoints for blockchain data extraction
+---
+
+The EVM RPC provider enables data extraction from Ethereum and EVM-compatible blockchains via standard JSON-RPC endpoints. It supports HTTP, WebSocket, and IPC connections with configurable rate limiting, request batching, and concurrent request management.
+
+## Overview
+
+EVM RPC providers connect to Ethereum-compatible JSON-RPC endpoints to extract blockchain data into three tables:
+
+- **blocks**: Block headers and metadata
+- **transactions**: Transaction data including inputs, outputs, and gas usage
+- **logs**: Event logs emitted by smart contracts
+
+### Key Features
+
+- **Multiple connection types**: HTTP, WebSocket, and IPC socket support
+- **Request batching**: Combine multiple RPC calls into single HTTP requests
+- **Rate limiting**: Throttle requests to avoid endpoint quotas
+- **Concurrent requests**: Configurable parallelism with semaphore-based limits
+- **Flexible receipt fetching**: Bulk or per-transaction receipt strategies
+
+## Configuration
+
+### Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Must be `"evm-rpc"` |
+| `network` | string | Network identifier (e.g., `mainnet`, `base`, `polygon`) |
+| `url` | string | RPC endpoint URL (supports `http://`, `https://`, `ws://`, `wss://`, `ipc://`) |
+
+### Optional Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `concurrent_request_limit` | number | 1024 | Maximum number of concurrent requests |
+| `rpc_batch_size` | number | 0 | Requests per batch (0 = disabled) |
+| `rate_limit_per_minute` | number | none | Rate limit in requests per minute |
+| `fetch_receipts_per_tx` | boolean | false | Use per-transaction receipt fetching |
+| `auth_token` | string | none | Authentication token for RPC requests |
+| `auth_header` | string | none | Custom authentication header name |
+| `timeout_secs` | number | 30 | Request timeout in seconds |
+
+### Minimal Configuration
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "${ETH_MAINNET_RPC_URL}"
+```
+
+### Full Configuration Example
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "${ETH_MAINNET_RPC_URL}"
+
+# Performance tuning
+concurrent_request_limit = 512
+rpc_batch_size = 100
+rate_limit_per_minute = 1000
+timeout_secs = 60
+
+# Receipt fetching strategy
+fetch_receipts_per_tx = false
+
+# Authentication (optional)
+auth_token = "${ETH_MAINNET_RPC_AUTH_TOKEN}"
+auth_header = "Authorization"
+```
+
+## Connection Types
+
+The provider automatically detects the connection type from the URL scheme:
+
+### HTTP/HTTPS
+
+Standard HTTP(S) connections for most RPC providers:
+
+```toml
+# HTTP endpoint
+url = "http://localhost:8545"
+
+# HTTPS with API key
+url = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
+
+# HTTPS with authentication
+url = "${ETH_MAINNET_RPC_URL}"
+auth_token = "${ETH_MAINNET_RPC_AUTH_TOKEN}"
+```
+
+### WebSocket
+
+Persistent WebSocket connections for lower latency:
+
+```toml
+# WebSocket endpoint
+url = "ws://localhost:8546"
+
+# Secure WebSocket
+url = "wss://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
+```
+
+### IPC Socket
+
+Local IPC socket connections for nodes running on the same machine:
+
+```toml
+# Local geth IPC socket
+url = "ipc:///home/user/.ethereum/geth.ipc"
+
+# Alternative path
+url = "ipc:///var/lib/ethereum/geth.ipc"
+```
+
+<Note>
+IPC connections only work with local nodes and provide the lowest latency.
+</Note>
+
+## Authentication
+
+### Bearer Token (Default)
+
+By default, `auth_token` is sent as a Bearer token:
+
+```toml
+url = "https://eth-mainnet.example.com"
+auth_token = "${ETH_MAINNET_RPC_AUTH_TOKEN}"
+```
+
+This sends: `Authorization: Bearer <token>`
+
+### Custom Header
+
+Some providers require custom authentication headers:
+
+```toml
+url = "https://eth-mainnet.drpc.org"
+auth_token = "${DRPC_API_KEY}"
+auth_header = "Drpc-Key"
+```
+
+This sends: `Drpc-Key: <token>`
+
+<Warning>
+Use environment variables for authentication tokens to prevent credential leakage in logs and error messages.
+</Warning>
+
+## Performance Optimization
+
+### Request Batching
+
+Batch multiple RPC calls into a single HTTP request to reduce overhead:
+
+```toml
+# Batch up to 100 RPC calls per request
+rpc_batch_size = 100
+```
+
+**Benefits**:
+- Reduces HTTP request overhead
+- Lower latency for multiple calls
+- Better network utilization
+
+**Trade-offs**:
+- Some RPC providers don't support batching
+- Larger batch sizes may hit provider limits
+- Failed batches retry individual requests
+
+### Rate Limiting
+
+Prevent hitting provider rate limits:
+
+```toml
+# 10 requests per second = 600 per minute
+rate_limit_per_minute = 600
+
+# 5 requests per second
+rate_limit_per_minute = 300
+```
+
+<Tip>
+Set this slightly below your provider's actual limit to account for other applications using the same endpoint.
+</Tip>
+
+### Concurrent Requests
+
+Control parallelism to balance throughput and resource usage:
+
+```toml
+# Higher concurrency for fast endpoints
+concurrent_request_limit = 2048
+
+# Lower concurrency for rate-limited endpoints
+concurrent_request_limit = 256
+```
+
+## Receipt Fetching Strategies
+
+Transaction receipts contain important data like gas used, logs, and execution status. Two strategies are available:
+
+### Bulk Receipts (Default)
+
+```toml
+fetch_receipts_per_tx = false  # default
+```
+
+- Uses `eth_getBlockReceipts` to fetch all receipts in one call
+- **Faster**: Single RPC call per block
+- **Requires**: RPC endpoint support for `eth_getBlockReceipts`
+- **Recommended** for most modern RPC providers
+
+### Per-Transaction Receipts
+
+```toml
+fetch_receipts_per_tx = true
+```
+
+- Uses `eth_getTransactionReceipt` for each transaction
+- **Slower**: One RPC call per transaction
+- **Compatible**: Works with all RPC endpoints
+- **Use when**: Provider doesn't support `eth_getBlockReceipts`
+
+## Supported Chains
+
+Any Ethereum-compatible chain with JSON-RPC support:
+
+### Ethereum and L2s
+
+```toml
+# Ethereum mainnet
+network = "mainnet"
+
+# Base L2
+network = "base"
+
+# Arbitrum One
+network = "arbitrum-one"
+
+# Optimism
+network = "optimism"
+
+# Polygon PoS
+network = "polygon"
+```
+
+### Testnets
+
+```toml
+# Sepolia testnet
+network = "sepolia"
+
+# Goerli testnet (deprecated)
+network = "goerli"
+```
+
+### Local Networks
+
+```toml
+# Local development
+network = "anvil"
+url = "http://localhost:8545"
+
+# Hardhat Network
+network = "hardhat"
+url = "http://localhost:8545"
+```
+
+## Extracted Tables
+
+### blocks
+
+Block header information:
+
+- `number`: Block number
+- `hash`: Block hash
+- `parent_hash`: Previous block hash
+- `timestamp`: Block timestamp
+- `miner`: Block producer address
+- `gas_limit`, `gas_used`: Gas metrics
+- Additional header fields
+
+### transactions
+
+Transaction data:
+
+- `block_number`, `block_hash`: Block reference
+- `transaction_index`: Position in block
+- `hash`: Transaction hash
+- `from`, `to`: Sender and recipient addresses
+- `value`: ETH transferred
+- `gas`, `gas_price`: Gas parameters
+- `input`: Transaction input data
+- `v`, `r`, `s`: Signature components
+
+### logs
+
+Event logs emitted by smart contracts:
+
+- `block_number`, `block_hash`: Block reference
+- `transaction_hash`, `transaction_index`: Transaction reference
+- `log_index`: Position in block
+- `address`: Contract address
+- `topics`: Indexed event parameters
+- `data`: Non-indexed event data
+
+## Example Configurations
+
+### Alchemy
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+rate_limit_per_minute = 1800  # 30 req/sec for free tier
+rpc_batch_size = 100
+```
+
+### Infura
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "https://mainnet.infura.io/v3/${INFURA_PROJECT_ID}"
+rate_limit_per_minute = 600  # 10 req/sec for free tier
+```
+
+### dRPC
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "https://eth.drpc.org"
+auth_token = "${DRPC_API_KEY}"
+auth_header = "Drpc-Key"
+rpc_batch_size = 50
+```
+
+### Local Geth Node
+
+```toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "ipc:///home/ethereum/.ethereum/geth.ipc"
+concurrent_request_limit = 2048
+rpc_batch_size = 100
+```
+
+## Troubleshooting
+
+### Connection Failures
+
+- Verify the URL is correct and the endpoint is accessible
+- Check environment variables are set correctly
+- Ensure authentication credentials are valid
+- Test the endpoint with curl or other tools
+
+### Rate Limiting Errors
+
+- Reduce `rate_limit_per_minute` to stay within provider limits
+- Lower `concurrent_request_limit` to reduce burst traffic
+- Consider upgrading to a higher-tier plan
+
+### Batch Request Failures
+
+- Some providers don't support batch requests
+- Set `rpc_batch_size = 0` to disable batching
+- Try smaller batch sizes (e.g., 10-50)
+
+### Receipt Fetching Issues
+
+If you see errors about `eth_getBlockReceipts`:
+
+```toml
+# Switch to per-transaction receipt fetching
+fetch_receipts_per_tx = true
+```
+
+## Related Documentation
+
+- [Data Sources Overview](/sources/overview) - Provider system concepts
+- [Firehose Provider](/sources/firehose) - Alternative high-throughput extraction
+- [Configuration](/configuration/overview) - Main configuration file setup

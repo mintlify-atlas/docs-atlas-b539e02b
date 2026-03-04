@@ -1,0 +1,113 @@
+---
+title: Admin API Overview
+description: RESTful HTTP interface for managing Amp's ETL operations
+---
+
+The Admin API provides a comprehensive interface for managing Amp's data pipeline operations. This API allows you to deploy datasets, trigger extraction jobs, monitor progress, manage distributed workers, and configure external data providers.
+
+## Base URL
+
+The Admin API runs on port **1610** by default:
+
+```
+http://localhost:1610
+```
+
+## Key Capabilities
+
+### Dataset Management
+Handle the lifecycle of data extraction configurations:
+- List all registered datasets from the metadata database
+- Register new dataset configurations with versioning support
+- Trigger data extraction jobs for specific datasets or versions
+- Retrieve dataset details including tables and storage locations
+
+### Job Control
+Control and monitor data extraction and processing jobs:
+- List and retrieve job information with pagination
+- Trigger extraction jobs with optional end block configuration
+- Stop running jobs gracefully
+- Delete jobs in terminal states (Completed, Stopped, Failed)
+
+### Storage Management
+Manage locations where dataset tables are stored:
+- Supports local filesystem, S3, GCS, and Azure Blob Storage
+- List storage locations and their associated files
+- Delete locations with comprehensive cleanup
+- Query file information including Parquet metadata
+
+### Provider Configuration
+Configure external blockchain data sources:
+- Create, retrieve, and delete provider configurations
+- Support for EVM RPC endpoints and Firehose streams
+- Providers are reusable across multiple datasets
+
+### Worker Management
+Monitor and manage distributed worker nodes:
+- List all registered workers
+- Get detailed worker information including version and build metadata
+- Track worker health via heartbeat timestamps
+
+## Authentication
+
+The Admin API currently does not require authentication. Ensure you run it in a secure environment and restrict network access appropriately.
+
+## Error Responses
+
+All endpoints return errors using a standard format:
+
+```json
+{
+  "error_code": "DATASET_NOT_FOUND",
+  "error_message": "dataset 'eth_mainnet' version '1.0.0' not found"
+}
+```
+
+<ResponseField name="error_code" type="string" required>
+  Machine-readable error code in SCREAMING_SNAKE_CASE format. Error codes are stable across API versions and should be used for programmatic error handling.
+</ResponseField>
+
+<ResponseField name="error_message" type="string" required>
+  Human-readable error message providing detailed context. Messages may change over time - use `error_code` for programmatic decisions.
+</ResponseField>
+
+## Common Patterns
+
+### Dataset Versioning
+
+Datasets support multiple version reference types:
+- **Semantic version** (e.g., `1.2.3`) - specific tagged version
+- **Manifest hash** - SHA256 hash of the dataset configuration
+- **`latest`** - highest semantic version
+- **`dev`** - development version tag
+
+### Pagination
+
+List endpoints use cursor-based pagination:
+- Use `limit` query parameter to control page size (max 1000)
+- Use `last_job_id` or similar cursor parameter for subsequent pages
+- Response includes `next_cursor` field when more results are available
+
+### Idempotency
+
+Many destructive operations are idempotent:
+- Deleting a non-existent resource returns success
+- Safe to retry failed requests without side effects
+- Helps build resilient automation
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Dataset Management" icon="database" href="/api/admin/datasets">
+    Register and manage dataset configurations
+  </Card>
+  <Card title="Job Control" icon="play" href="/api/admin/jobs">
+    Trigger and monitor extraction jobs
+  </Card>
+  <Card title="Worker Management" icon="server" href="/api/admin/workers">
+    Monitor distributed worker nodes
+  </Card>
+  <Card title="Provider Config" icon="plug" href="/api/admin/providers">
+    Configure blockchain data sources
+  </Card>
+</CardGroup>

@@ -1,0 +1,364 @@
+---
+title: "JSON Lines (NDJSON) Protocol"
+description: "Simple HTTP interface for SQL queries with newline-delimited JSON responses"
+---
+
+The JSON Lines (JSONL) transport provides a simple HTTP interface for executing SQL queries against blockchain data. It accepts SQL as plain text POST body and returns results as newline-delimited JSON (NDJSON).
+
+## Overview
+
+JSON Lines is the simplest way to query data from Amp, ideal for:
+
+- Ad-hoc queries and data exploration
+- Integration with tools that support HTTP
+- Quick prototyping and testing
+- Applications that need JSON output
+
+### Key Features
+
+- **HTTP-based** - Standard POST requests with any HTTP client
+- **Plain text SQL** - No special encoding required
+- **NDJSON format** - One JSON object per line for streaming-friendly output
+- **Synchronous** - Results returned after full query execution
+
+## Server Configuration
+
+The JSON Lines endpoint runs on port **1603** by default.
+
+### Default Setup
+
+```bash
+ampd server
+# JSON Lines available at: http://localhost:1603
+```
+
+### Custom Port Configuration
+
+```toml .amp/config.toml
+jsonl_addr = "0.0.0.0:1603"
+```
+
+Or via environment variable:
+
+```bash
+export AMP_CONFIG_JSONL_ADDR="0.0.0.0:1603"
+ampd server
+```
+
+### JSONL-Only Mode
+
+Run only the JSON Lines endpoint:
+
+```bash
+ampd server --jsonl-server
+```
+
+## API Reference
+
+### POST /
+
+Execute a SQL query.
+
+**Request:**
+
+- **Method:** `POST`
+- **Path:** `/`
+- **Content-Type:** `text/plain`
+- **Body:** SQL query string
+
+**Response:**
+
+- **Content-Type:** `application/x-ndjson`
+- **Body:** Newline-delimited JSON records
+- **Status Codes:**
+  - `200 OK` - Query executed successfully
+  - `400 Bad Request` - Invalid SQL or unsupported operation
+  - `500 Internal Server Error` - Server error during execution
+
+### GET /health
+
+Health check endpoint.
+
+**Request:**
+
+- **Method:** `GET`
+- **Path:** `/health`
+
+**Response:**
+
+- **Status:** `200 OK`
+
+## Basic Usage
+
+### curl Examples
+
+#### Simple Query
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 10"
+```
+
+#### Query with WHERE Clause
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT block_num, hash FROM eth_rpc.blocks WHERE block_num > 18000000 LIMIT 10"
+```
+
+#### Multi-line Query
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "
+SELECT 
+  block_num,
+  hash,
+  timestamp,
+  gas_used
+FROM eth_rpc.blocks
+WHERE block_num BETWEEN 18000000 AND 18000100
+ORDER BY block_num
+"
+```
+
+#### Query with Namespace
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data 'SELECT * FROM "my_namespace/eth_rpc".blocks LIMIT 10'
+```
+
+### Response Format
+
+Successful queries return NDJSON (Newline-Delimited JSON), where each line is a complete JSON object representing one result row:
+
+```json
+{"block_num": 18000000, "hash": "0x123...", "timestamp": 1234567890}
+{"block_num": 18000001, "hash": "0x456...", "timestamp": 1234567902}
+{"block_num": 18000002, "hash": "0x789...", "timestamp": 1234567914}
+```
+
+This format is:
+
+- **Streaming-friendly** - Parse line-by-line without loading entire response
+- **Simple** - Each line is valid JSON
+- **Efficient** - No array wrapper overhead
+
+### Processing NDJSON
+
+#### With jq
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 5" \
+  | jq -c '.'
+```
+
+#### With Python
+
+```python
+import requests
+import json
+
+response = requests.post(
+    "http://localhost:1603",
+    data="SELECT * FROM eth_rpc.blocks LIMIT 10",
+    headers={"Content-Type": "text/plain"}
+)
+
+for line in response.text.strip().split('\n'):
+    record = json.loads(line)
+    print(f"Block {record['block_num']}: {record['hash']}")
+```
+
+#### With Node.js
+
+```javascript
+const fetch = require('node-fetch');
+
+async function query() {
+  const response = await fetch('http://localhost:1603', {
+    method: 'POST',
+    body: 'SELECT * FROM eth_rpc.blocks LIMIT 10',
+    headers: { 'Content-Type': 'text/plain' }
+  });
+
+  const text = await response.text();
+  const lines = text.trim().split('\n');
+  
+  for (const line of lines) {
+    const record = JSON.parse(line);
+    console.log(`Block ${record.block_num}: ${record.hash}`);
+  }
+}
+
+query();
+```
+
+## UDF Examples
+
+JSON Lines supports all SQL UDFs:
+
+### Hex Decoding
+
+```bash
+curl -X POST http://localhost:1603 --data "
+SELECT
+  evm_decode_hex(address) as contract,
+  evm_decode_hex(topics[1]) as event_signature
+FROM eth_rpc.logs
+LIMIT 5
+"
+```
+
+### Unit Conversion
+
+```bash
+curl -X POST http://localhost:1603 --data "
+SELECT
+  shift_units('1.5', 18) as wei,
+  shift_units('1500000000000000000', -18) as eth
+"
+```
+
+## Error Handling
+
+Errors return JSON with `error_code` and `error_message` fields.
+
+### Invalid SQL String
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:1603 --data ""
+```
+
+**Response (400 Bad Request):**
+
+```json
+{"error_code": "INVALID_SQL_STRING", "error_message": "SQL string validation failed"}
+```
+
+### SQL Parse Error
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:1603 --data "SELECT FROM"
+```
+
+**Response (400 Bad Request):**
+
+```json
+{"error_code": "SQL_PARSE_ERROR", "error_message": "Syntax error in SQL statement"}
+```
+
+### Streaming Not Supported
+
+**Request:**
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks SETTINGS stream = true"
+```
+
+**Response (400 Bad Request):**
+
+```json
+{
+  "error_code": "STREAMING_NOT_SUPPORTED",
+  "error_message": "Streaming queries (SETTINGS stream = true) are not supported on the JSONL endpoint. Please use the Arrow Flight endpoint instead."
+}
+```
+
+<Warning>
+The JSON Lines endpoint does not support streaming queries. Use [Arrow Flight](/querying/arrow-flight) for streaming.
+</Warning>
+
+## Verifying Connection
+
+Check if the JSON Lines server is running:
+
+```bash
+curl http://localhost:1603/health
+```
+
+Successful response returns `200 OK`.
+
+## Limitations
+
+- **Batch queries only** - Streaming queries (`SETTINGS stream = true`) are rejected
+- **Single statements only** - Multiple SQL statements per request are not supported
+- **JSON output only** - Results are always NDJSON format
+- **No Arrow benefits** - No zero-copy reads or columnar processing
+
+## When to Use JSON Lines
+
+### Best For:
+
+- Quick data exploration with curl
+- Integration with JSON-based systems
+- Simple scripts and automation
+- Ad-hoc queries and debugging
+
+### Not Ideal For:
+
+- High-throughput production workloads (use Arrow Flight)
+- Streaming queries (use Arrow Flight)
+- Large result sets (use Arrow Flight for better memory efficiency)
+- Applications that can use Arrow format natively
+
+## Python Client Library
+
+While curl works great, you can create a simple Python wrapper:
+
+```python
+import requests
+import json
+from typing import Iterator, Dict, Any
+
+class AmpJSONLClient:
+    def __init__(self, url: str = "http://localhost:1603"):
+        self.url = url
+    
+    def query(self, sql: str) -> Iterator[Dict[str, Any]]:
+        """Execute SQL query and yield results line by line."""
+        response = requests.post(
+            self.url,
+            data=sql,
+            headers={"Content-Type": "text/plain"},
+            stream=True
+        )
+        response.raise_for_status()
+        
+        for line in response.iter_lines():
+            if line:
+                yield json.loads(line.decode('utf-8'))
+    
+    def query_all(self, sql: str) -> list[Dict[str, Any]]:
+        """Execute SQL query and return all results as a list."""
+        return list(self.query(sql))
+
+# Usage
+client = AmpJSONLClient()
+
+for record in client.query("SELECT * FROM eth_rpc.blocks LIMIT 10"):
+    print(f"Block {record['block_num']}: {record['hash']}")
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SQL Basics" icon="database" href="/querying/sql-basics">
+    Learn SQL syntax and query patterns
+  </Card>
+  
+  <Card title="Arrow Flight" icon="bolt" href="/querying/arrow-flight">
+    High-performance gRPC interface for production
+  </Card>
+  
+  <Card title="Streaming" icon="wave" href="/querying/streaming">
+    Set up real-time streaming queries (requires Arrow Flight)
+  </Card>
+</CardGroup>

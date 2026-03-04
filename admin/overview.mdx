@@ -1,0 +1,216 @@
+---
+title: Administration Overview
+description: Manage Amp infrastructure via ampctl CLI and Admin API
+---
+
+Amp provides comprehensive management and administration capabilities for operating blockchain data infrastructure. Administrators can manage datasets, control extraction jobs, monitor workers, and configure providers through both the `ampctl` CLI and the Admin API.
+
+## Admin Interfaces
+
+Amp offers two complementary interfaces for administration:
+
+<CardGroup cols={2}>
+  <Card title="ampctl CLI" icon="terminal">
+    Command-line tool for interactive administration and scripting
+  </Card>
+  <Card title="Admin API" icon="code">
+    RESTful HTTP API for programmatic access and automation
+  </Card>
+</CardGroup>
+
+### Admin API Endpoint
+
+The Admin API is served by the `ampd controller` process on **port 1610**:
+
+```bash
+# Default endpoint
+http://localhost:1610
+
+# Example API calls
+curl http://localhost:1610/datasets
+curl http://localhost:1610/jobs
+curl http://localhost:1610/workers
+```
+
+### CLI vs API Usage
+
+Both interfaces provide access to the same functionality:
+
+```bash
+# Using ampctl CLI
+ampctl dataset list
+ampctl job list
+ampctl worker list
+
+# Equivalent API calls
+curl http://localhost:1610/datasets
+curl http://localhost:1610/jobs
+curl http://localhost:1610/workers
+```
+
+The CLI provides:
+- Human-readable output formatting
+- Interactive workflows
+- Built-in validation and error messages
+- Convenient aliases and shortcuts
+
+The API provides:
+- Programmatic access for automation
+- Integration with monitoring systems
+- Custom tooling and dashboards
+- Direct access from applications
+
+## Core Administration Operations
+
+Amp administration covers four main areas:
+
+<CardGroup cols={2}>
+  <Card title="Dataset Management" icon="database" href="/admin/datasets">
+    Register, deploy, and manage blockchain dataset configurations
+  </Card>
+  <Card title="Job Control" icon="play" href="/admin/jobs">
+    Monitor, start, stop, and manage extraction jobs
+  </Card>
+  <Card title="Worker Management" icon="server" href="/admin/workers">
+    Monitor worker health, versions, and availability
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/admin/monitoring">
+    Track metrics, health, and performance
+  </Card>
+</CardGroup>
+
+### Dataset Management
+
+Manage the lifecycle of blockchain datasets:
+
+- **Register datasets** - Store dataset manifests with version tags
+- **Deploy datasets** - Schedule extraction jobs to sync blockchain data
+- **List datasets** - View all registered datasets and versions
+- **Inspect datasets** - Get detailed configuration and metadata
+- **Restore datasets** - Recover metadata from object storage
+
+### Job Control
+
+Control and monitor extraction jobs:
+
+- **List jobs** - View active and historical jobs with pagination
+- **Inspect jobs** - Get detailed job status and configuration
+- **Monitor progress** - Track sync state and block numbers
+- **Stop jobs** - Gracefully terminate running jobs
+- **Remove jobs** - Clean up completed or failed jobs
+
+### Worker Management
+
+Monitor the distributed worker fleet:
+
+- **List workers** - View all registered workers
+- **Inspect workers** - Get detailed worker information and build version
+- **Monitor health** - Track heartbeats and worker availability
+- **Troubleshoot** - Debug worker issues and version mismatches
+
+### Monitoring & Observability
+
+Track system health and performance:
+
+- **Health checks** - Verify system components are operational
+- **Metrics** - Collect and export operational metrics
+- **OpenTelemetry** - Integration with observability platforms
+- **Progress tracking** - Monitor data sync status
+
+## Quick Start Examples
+
+### Using ampctl CLI
+
+```bash
+# List all datasets
+ampctl dataset list
+
+# Register a new dataset
+ampctl dataset register ethereum/mainnet ./manifest.json --tag 1.0.0
+
+# Deploy a dataset for extraction
+ampctl dataset deploy ethereum/mainnet@1.0.0
+
+# Check job status
+ampctl job list
+
+# Monitor job progress
+ampctl job progress 123
+
+# Check worker health
+ampctl worker list
+```
+
+### Using Admin API
+
+```bash
+# List all datasets
+curl http://localhost:1610/datasets
+
+# Get dataset details
+curl http://localhost:1610/datasets/ethereum/mainnet/versions/1.0.0
+
+# Deploy a dataset
+curl -X POST http://localhost:1610/datasets/ethereum/mainnet/versions/1.0.0/deploy \
+  -H "Content-Type: application/json" \
+  -d '{"end_block": null, "parallelism": 1}'
+
+# List active jobs
+curl http://localhost:1610/jobs?status=active
+
+# Get job progress
+curl http://localhost:1610/jobs/123/progress
+
+# List workers
+curl http://localhost:1610/workers
+```
+
+## JSON Output for Automation
+
+All ampctl commands support `--json` flag for machine-readable output:
+
+```bash
+# Get JSON output
+ampctl dataset list --json
+ampctl job list --json
+ampctl worker list --json
+
+# Pipe to jq for processing
+ampctl job list --json | jq '.jobs[] | select(.status == "RUNNING")'
+ampctl worker list --json | jq -r '.workers[] | "\(.node_id): \(.heartbeat_at)"'
+```
+
+## Architecture
+
+Administration flows through the following components:
+
+```
+Operator → ampctl CLI → Admin API (port 1610) → Controller → Metadata DB
+                ↓
+         Admin Client Library
+```
+
+**Components:**
+
+- **ampctl** - CLI tool that calls the Admin API
+- **Admin API** - RESTful HTTP service served by `ampd controller`
+- **Admin Client** - Rust library for programmatic API access
+- **Controller** - Orchestrates operations and manages metadata
+- **Metadata DB** - PostgreSQL database storing system state
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Dataset Management" icon="database" href="/admin/datasets">
+    Learn how to register and deploy datasets
+  </Card>
+  <Card title="Job Management" icon="play" href="/admin/jobs">
+    Control and monitor extraction jobs
+  </Card>
+  <Card title="Worker Management" icon="server" href="/admin/workers">
+    Monitor and troubleshoot workers
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/admin/monitoring">
+    Set up metrics and observability
+  </Card>
+</CardGroup>

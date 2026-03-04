@@ -1,0 +1,166 @@
+---
+title: 'ampd server'
+description: 'Start query servers for Arrow Flight and JSON Lines'
+---
+
+## Synopsis
+
+```bash
+ampd --config <path> server [OPTIONS]
+```
+
+## Description
+
+Starts one or more query servers for serving blockchain data through different protocols. By default, both query servers (Arrow Flight and JSON Lines) are started. Servers can be selectively enabled using flags.
+
+**Default behavior**: If no server flags (`--flight-server`, `--jsonl-server`) are specified, BOTH servers are enabled by default. When any server flag is specified, only the explicitly enabled servers will start.
+
+The server runs continuously until terminated (Ctrl+C or kill signal).
+
+## Options
+
+<ParamField path="--flight-server" type="boolean" default="false">
+  Enable Arrow Flight RPC Server. This provides a high-performance binary protocol for querying data (default port 1602). Uses Apache Arrow Flight for efficient data transfer.
+  
+  Can also be set via the `FLIGHT_SERVER` environment variable.
+</ParamField>
+
+<ParamField path="--jsonl-server" type="boolean" default="false">
+  Enable JSON Lines Server. This provides a simple HTTP interface for querying data (default port 1603). Accepts SQL queries via POST requests and returns results in JSON Lines format.
+  
+  Can also be set via the `JSONL_SERVER` environment variable.
+</ParamField>
+
+## Configuration
+
+Server ports and query settings are configured in the TOML config file:
+
+```toml
+# Server addresses
+flight_addr = "0.0.0.0:1602"
+jsonl_addr = "0.0.0.0:1603"
+
+# Streaming settings
+server_microbatch_max_interval = 100
+keep_alive_interval = 60
+```
+
+### Configuration Fields
+
+<ParamField path="flight_addr" type="string" default="0.0.0.0:1602">
+  Arrow Flight server binding address and port
+</ParamField>
+
+<ParamField path="jsonl_addr" type="string" default="0.0.0.0:1603">
+  JSON Lines server binding address and port
+</ParamField>
+
+<ParamField path="server_microbatch_max_interval" type="integer">
+  Maximum blocks per streaming microbatch
+</ParamField>
+
+<ParamField path="keep_alive_interval" type="integer">
+  Seconds between keep-alive messages (minimum 30 seconds)
+</ParamField>
+
+### Environment Overrides
+
+```bash
+export AMP_CONFIG_FLIGHT_ADDR="0.0.0.0:1602"
+export AMP_CONFIG_JSONL_ADDR="0.0.0.0:1603"
+export AMP_CONFIG_SERVER_MICROBATCH_MAX_INTERVAL="100"
+export AMP_CONFIG_KEEP_ALIVE_INTERVAL="60"
+```
+
+## Available Endpoints
+
+| Endpoint | Default Port | Protocol | Streaming | Use Case |
+|----------|--------------|----------|-----------|----------|
+| Arrow Flight | 1602 | gRPC | Yes | High-performance queries, batch and streaming |
+| JSON Lines | 1603 | HTTP | No | Simple HTTP queries, batch only |
+
+## Examples
+
+### Start Both Servers (Default)
+
+```bash
+ampd --config config.toml server
+```
+
+Starts both Arrow Flight (1602) and JSON Lines (1603) servers.
+
+### Start Only Arrow Flight Server
+
+```bash
+ampd --config config.toml server --flight-server
+```
+
+Starts only the Arrow Flight RPC Server on port 1602.
+
+### Start Only JSON Lines Server
+
+```bash
+ampd --config config.toml server --jsonl-server
+```
+
+Starts only the JSON Lines Server on port 1603.
+
+### Using Environment Variables
+
+```bash
+export AMP_CONFIG=config.toml
+export FLIGHT_SERVER=true
+ampd server
+```
+
+## Verifying Server Status
+
+### Check JSON Lines Endpoint
+
+```bash
+curl http://localhost:1603/health
+```
+
+### Check Arrow Flight Endpoint
+
+```bash
+# Requires grpcurl
+grpcurl -plaintext localhost:1602 list
+```
+
+## Querying Examples
+
+### JSON Lines Query
+
+```bash
+curl -X POST http://localhost:1603/query/jsonl \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT 1 as value"}'
+```
+
+### Arrow Flight Query
+
+See the Arrow Flight transport documentation for detailed client usage.
+
+## Directory Configuration
+
+`ampd server` requires `--config` (or `AMP_CONFIG`) to be provided. Default `data`, `providers`, and `manifests` directory paths are resolved relative to the config file's parent directory only when the config file does not specify those paths.
+
+When the config file specifies `data_dir`, `providers_dir`, or `manifests_dir`, those values are used directly.
+
+This command does not create directories itself; it relies on the configured paths and any downstream components to create or validate storage locations as needed.
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Server shut down gracefully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during server operation or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd overview](/cli/ampd/overview) - Command overview and global options
+- [ampd solo](/cli/ampd/solo) - Development mode with embedded worker

@@ -1,0 +1,306 @@
+---
+title: "SQL Basics"
+description: "Learn SQL syntax and query patterns for blockchain data with DataFusion"
+---
+
+Amp uses Apache DataFusion as its SQL query engine, providing a rich SQL dialect with support for complex queries, aggregations, and blockchain-specific functions.
+
+## Query Syntax
+
+### Basic SELECT Queries
+
+Query blockchain data using standard SQL syntax:
+
+```sql
+SELECT block_num, hash, timestamp
+FROM eth_rpc.blocks
+WHERE block_num > 1000000
+LIMIT 100
+```
+
+### Namespace and Table Syntax
+
+Datasets in Amp use a `namespace/dataset.table` naming convention:
+
+```sql
+-- Default namespace
+SELECT * FROM eth_rpc.blocks LIMIT 10
+
+-- Explicit namespace with quotes
+SELECT * FROM "my_namespace/eth_rpc".blocks LIMIT 10
+
+-- Versioned datasets
+SELECT block_num FROM "_/multi_version@0.0.1".blocks LIMIT 10
+
+-- Latest version tag
+SELECT block_num FROM "_/multi_version@latest".blocks LIMIT 10
+```
+
+<Note>
+Namespaces with slashes or special characters must be enclosed in double quotes.
+</Note>
+
+## Common Query Patterns
+
+### Filtering by Block Range
+
+```sql
+SELECT block_num, hash, gas_used
+FROM eth_rpc.blocks
+WHERE block_num BETWEEN 18000000 AND 18001000
+ORDER BY block_num
+```
+
+### Querying Logs and Events
+
+```sql
+SELECT 
+  block_num,
+  log_index,
+  address,
+  topics[1] as event_signature
+FROM eth_rpc.logs
+WHERE block_num > 18000000
+LIMIT 100
+```
+
+### Aggregations (Batch Queries Only)
+
+Aggregate functions work in batch mode but are not supported in streaming queries:
+
+```sql
+SELECT
+  DATE_TRUNC('day', timestamp) as day,
+  COUNT(*) as block_count,
+  AVG(gas_used) as avg_gas
+FROM eth_rpc.blocks
+GROUP BY DATE_TRUNC('day', timestamp)
+ORDER BY day DESC
+```
+
+### Window Functions (Batch Queries Only)
+
+```sql
+SELECT
+  block_num,
+  gas_used,
+  AVG(gas_used) OVER (
+    ORDER BY block_num 
+    ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+  ) as rolling_avg
+FROM eth_rpc.blocks
+WHERE block_num > 18000000
+LIMIT 100
+```
+
+<Warning>
+Aggregations, DISTINCT, LIMIT, ORDER BY, and window functions require batch query mode. They cannot be used with `SETTINGS stream = true`.
+</Warning>
+
+## User-Defined Functions (UDFs)
+
+Amp provides blockchain-specific UDFs for working with EVM data:
+
+### Hex Encoding/Decoding
+
+```sql
+-- Decode hex strings to binary
+SELECT evm_decode_hex(address) as contract
+FROM eth_rpc.logs
+LIMIT 10
+
+-- Encode binary to hex strings
+SELECT evm_encode_hex(address) as contract_hex
+FROM eth_rpc.logs
+LIMIT 10
+```
+
+### Unit Shifting (Token Decimals)
+
+Convert between human-readable and raw token amounts:
+
+```sql
+-- Convert 1.5 ETH to wei (shift right by 18 places)
+SELECT shift_units('1.5', 18) as wei
+-- Returns: "1500000000000000000"
+
+-- Convert wei back to ETH (shift left by 18 places)
+SELECT shift_units('1500000000000000000', -18) as eth
+-- Returns: "1.5"
+
+-- Convert 100 USDC to raw units (6 decimals)
+SELECT shift_units('100', 6) as raw_usdc
+-- Returns: "100000000"
+```
+
+### Event Topic Extraction
+
+```sql
+SELECT 
+  evm_topic(topics, 0) as event_signature,
+  evm_topic(topics, 1) as indexed_param_1,
+  evm_topic(topics, 2) as indexed_param_2
+FROM eth_rpc.logs
+WHERE address = '0x...'
+LIMIT 10
+```
+
+### Available UDFs
+
+<AccordionGroup>
+  <Accordion title="evm_decode_hex - Convert hex strings to binary">
+    Decodes hex strings (with or without `0x` prefix) to `FixedSizeBinary`.
+    
+    ```sql
+    evm_decode_hex('0x1234...') -- Returns FixedSizeBinary
+    ```
+  </Accordion>
+  
+  <Accordion title="evm_encode_hex - Convert binary to hex strings">
+    Encodes `FixedSizeBinary(20)` or `FixedSizeBinary(32)` to hex string.
+    
+    ```sql
+    evm_encode_hex(address) -- Returns "0x1234..."
+    ```
+  </Accordion>
+  
+  <Accordion title="shift_units - Convert token decimals">
+    Shifts decimal point for token amount conversions.
+    
+    ```sql
+    shift_units('1.5', 18)   -- ETH to wei
+    shift_units('1500000000000000000', -18)  -- wei to ETH
+    ```
+  </Accordion>
+  
+  <Accordion title="evm_topic - Extract event topics by index">
+    Retrieves a specific topic from the topics array.
+    
+    ```sql
+    evm_topic(topics, 0)  -- Event signature
+    evm_topic(topics, 1)  -- First indexed parameter
+    ```
+  </Accordion>
+  
+  <Accordion title="evm_decode_type - Decode EVM types">
+    Decodes binary data according to Solidity ABI types.
+    
+    ```sql
+    evm_decode_type(data, 'uint256')  -- Decode as uint256
+    ```
+  </Accordion>
+  
+  <Accordion title="evm_encode_type - Encode to EVM types">
+    Encodes values according to Solidity ABI types.
+    
+    ```sql
+    evm_encode_type('42', 'uint256')  -- Encode as uint256
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## DataFusion SQL Support
+
+Amp supports the full DataFusion SQL dialect, including:
+
+- **SELECT** - Projection, aliases, expressions
+- **FROM** - Table references, subqueries
+- **WHERE** - Filtering with complex predicates
+- **JOIN** - INNER, LEFT, RIGHT, FULL, CROSS
+- **GROUP BY** - Aggregations (batch only)
+- **ORDER BY** - Sorting (batch only)
+- **LIMIT/OFFSET** - Result pagination (batch only)
+- **DISTINCT** - Deduplication (batch only)
+- **Window Functions** - OVER clause (batch only)
+- **CTEs (WITH)** - Common Table Expressions
+- **UNION/INTERSECT/EXCEPT** - Set operations
+- **Subqueries** - Nested SELECT statements
+
+### Data Types
+
+DataFusion supports standard SQL types:
+
+- **Numeric**: `INT`, `BIGINT`, `DECIMAL`, `FLOAT`, `DOUBLE`
+- **String**: `VARCHAR`, `TEXT`
+- **Binary**: `BINARY`, `VARBINARY`
+- **Boolean**: `BOOLEAN`
+- **Temporal**: `DATE`, `TIMESTAMP`, `TIME`
+- **Complex**: `ARRAY`, `STRUCT`, `MAP`
+
+## Query Modes
+
+### Batch Queries (Default)
+
+Execute once and return complete results:
+
+```sql
+SELECT * FROM eth_rpc.blocks
+WHERE block_num > 18000000
+LIMIT 100
+```
+
+### Streaming Queries
+
+Continuously process new blocks as they arrive:
+
+```sql
+SELECT * FROM eth_rpc.blocks
+SETTINGS stream = true
+```
+
+<Note>
+Streaming queries require the Arrow Flight interface and have limitations on supported operations. See [Streaming](/querying/streaming) for details.
+</Note>
+
+## Examples by Use Case
+
+### Latest Blocks
+
+```sql
+SELECT block_num, hash, timestamp, gas_used
+FROM eth_rpc.blocks
+ORDER BY block_num DESC
+LIMIT 20
+```
+
+### Contract Event Analysis
+
+```sql
+SELECT 
+  block_num,
+  evm_encode_hex(address) as contract,
+  topics[1] as event_sig,
+  data
+FROM eth_rpc.logs
+WHERE evm_encode_hex(address) = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+  AND block_num > 18000000
+LIMIT 100
+```
+
+### Gas Usage Statistics (Batch Only)
+
+```sql
+SELECT
+  MIN(gas_used) as min_gas,
+  MAX(gas_used) as max_gas,
+  AVG(gas_used) as avg_gas,
+  STDDEV(gas_used) as stddev_gas
+FROM eth_rpc.blocks
+WHERE block_num BETWEEN 18000000 AND 18001000
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Arrow Flight" icon="bolt" href="/querying/arrow-flight">
+    Execute SQL queries via high-performance gRPC
+  </Card>
+  
+  <Card title="JSON Lines" icon="code" href="/querying/json-lines">
+    Query via simple HTTP interface
+  </Card>
+  
+  <Card title="Streaming" icon="wave" href="/querying/streaming">
+    Set up real-time streaming queries
+  </Card>
+</CardGroup>

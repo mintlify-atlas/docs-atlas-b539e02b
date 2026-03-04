@@ -1,0 +1,160 @@
+---
+title: 'ampd'
+description: 'Amp daemon for blockchain data extraction, transformation, and query serving'
+---
+
+## Overview
+
+`ampd` is the core Amp daemon that handles data extraction, transformation, and query serving. It is a multi-mode executable that can run in different operational configurations depending on deployment needs, from single-node development setups to distributed production deployments.
+
+## Subcommands
+
+<CardGroup cols={2}>
+
+<Card title="server" icon="server" href="/cli/ampd/server">
+  Start query servers (Arrow Flight and JSON Lines)
+</Card>
+
+<Card title="worker" icon="gears" href="/cli/ampd/worker">
+  Run distributed worker node for data extraction
+</Card>
+
+<Card title="controller" icon="sliders" href="/cli/ampd/controller">
+  Start controller service with Admin API
+</Card>
+
+<Card title="solo" icon="laptop-code" href="/cli/ampd/solo">
+  All-in-one development mode
+</Card>
+
+<Card title="migrate" icon="database" href="/cli/ampd/migrate">
+  Run database migrations
+</Card>
+
+<Card title="dump" icon="download">
+  Extract data from blockchain sources to Parquet
+</Card>
+
+</CardGroup>
+
+## Global Options
+
+<ParamField path="--config" type="string" default="AMP_CONFIG">
+  The configuration file to use. This file defines where to look for dataset definitions and providers, along with many other configuration options.
+  
+  Can also be set via the `AMP_CONFIG` environment variable.
+</ParamField>
+
+## Configuration
+
+The `--config` parameter (or `AMP_CONFIG` environment variable) points to a TOML configuration file that controls:
+
+- **Database connections**: PostgreSQL metadata database URL
+- **Storage locations**: Data directory, providers directory, manifests directory
+- **Server ports**: Arrow Flight, JSON Lines, and Admin API endpoints
+- **Provider settings**: RPC endpoints, Firehose connections
+- **Query settings**: Streaming intervals, keep-alive settings
+
+### Example Configuration
+
+```toml
+# Database
+metadata_db.url = "postgresql://localhost/amp"
+metadata_db.auto_migrate = true
+
+# Storage
+data_dir = "/data/amp"
+providers_dir = "/config/providers"
+manifests_dir = "/config/manifests"
+
+# Server ports
+flight_addr = "0.0.0.0:1602"
+jsonl_addr = "0.0.0.0:1603"
+admin_addr = "0.0.0.0:1610"
+
+# Query settings
+server_microbatch_max_interval = 100
+keep_alive_interval = 60
+```
+
+## Operational Modes
+
+`ampd` supports different deployment patterns:
+
+### Development Mode
+
+**Solo Mode** - All-in-one process for local development:
+```bash
+ampd solo
+```
+
+- Combines server, controller, and worker in one process
+- Embedded worker with node ID "worker"
+- All services on default ports (1602, 1603, 1610)
+
+### Production Mode
+
+**Distributed Deployment** - Independent services for production:
+
+```bash
+# Query serving
+ampd server
+
+# Job scheduling and admin API
+ampd controller
+
+# Data extraction (multiple instances)
+ampd worker --node-id worker-01
+ampd worker --node-id worker-02
+```
+
+- Independent scaling of components
+- Fault isolation between services
+- Horizontal scaling of workers
+
+## Common Workflows
+
+### Initial Setup
+
+```bash
+# 1. Run database migrations
+ampd --config config.toml migrate
+
+# 2. Start in development mode
+ampd --config config.toml solo
+```
+
+### Production Deployment
+
+```bash
+# 1. Run migrations once
+ampd --config config.toml migrate
+
+# 2. Start controller (job scheduling)
+ampd --config config.toml controller &
+
+# 3. Start query server
+ampd --config config.toml server &
+
+# 4. Start workers (scale as needed)
+ampd --config config.toml worker --node-id worker-01 &
+ampd --config config.toml worker --node-id worker-02 &
+```
+
+## Exit Codes
+
+<ResponseField name="0" type="success">
+  Operation completed successfully or service shut down gracefully
+</ResponseField>
+
+<ResponseField name="1" type="error">
+  Error occurred during operation or configuration is invalid
+</ResponseField>
+
+## See Also
+
+- [ampd server](/cli/ampd/server) - Query server configuration
+- [ampd worker](/cli/ampd/worker) - Worker node setup
+- [ampd controller](/cli/ampd/controller) - Controller and Admin API
+- [ampd solo](/cli/ampd/solo) - Development mode
+- [ampd migrate](/cli/ampd/migrate) - Database migrations

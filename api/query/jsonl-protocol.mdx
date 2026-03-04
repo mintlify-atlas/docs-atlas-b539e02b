@@ -1,0 +1,342 @@
+---
+title: JSON Lines Protocol
+description: Simple HTTP query interface with JSON Lines (NDJSON) responses
+---
+
+The JSON Lines (JSONL) transport provides a simple HTTP interface for executing SQL queries against blockchain datasets. It accepts SQL as plain text in the POST body and returns results as newline-delimited JSON (NDJSON).
+
+## Overview
+
+The JSONL endpoint is the simplest way to query data from Amp. It's ideal for:
+
+- Ad-hoc queries and exploration
+- Integration with tools that support HTTP
+- Simple scripting and automation
+- When you need JSON output format
+
+## Endpoint
+
+- **Protocol**: HTTP/HTTPS
+- **Default Port**: `1603`
+- **Default Address**: `0.0.0.0:1603`
+- **Configuration**: Set via `jsonl_addr` in config.toml or `AMP_CONFIG_JSONL_ADDR` environment variable
+
+## Request Format
+
+### Execute Query
+
+- **Method**: `POST`
+- **Path**: `/`
+- **Content-Type**: `text/plain`
+- **Body**: SQL query string
+- **Response Content-Type**: `application/x-ndjson`
+- **Response Body**: Newline-delimited JSON records
+
+### Health Check
+
+- **Method**: `GET`
+- **Path**: `/health`
+- **Response**: `200 OK`
+
+## Basic Usage
+
+### Simple Query
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 10"
+```
+
+### Query with Namespace
+
+When querying datasets with custom namespaces, use double quotes:
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data 'SELECT * FROM "my_namespace/eth_rpc".blocks LIMIT 10'
+```
+
+### Using jq for Pretty Output
+
+Process JSONL output with jq:
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 5" \
+  | jq -s '.'
+```
+
+### Query with User-Defined Functions
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT
+  evm_decode_hex(address) as contract,
+  evm_decode_hex(topics[1]) as event_signature
+FROM eth_rpc.logs
+LIMIT 5"
+```
+
+## Response Format
+
+### Success Response
+
+Successful queries return NDJSON format (one JSON object per line):
+
+```json
+{"block_num": 0, "hash": "0x123...", "timestamp": 1438269988}
+{"block_num": 1, "hash": "0x456...", "timestamp": 1438270005}
+{"block_num": 2, "hash": "0x789...", "timestamp": 1438270022}
+```
+
+Each line is a valid JSON object representing one result row. Lines are separated by newline characters (`\n`).
+
+### Empty Results
+
+Queries that return no results will have an empty response body:
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks WHERE number < 0"
+# Returns empty body with 200 OK
+```
+
+## Error Responses
+
+Error responses return JSON with `error_code` and `error_message` fields.
+
+### Invalid SQL String (400 Bad Request)
+
+```json
+{
+  "error_code": "INVALID_SQL_STRING",
+  "error_message": "SQL string validation failed"
+}
+```
+
+Triggered when:
+- Request body is empty
+- SQL contains multiple statements
+
+### Parse Error (400 Bad Request)
+
+```json
+{
+  "error_code": "SQL_PARSE_ERROR",
+  "error_message": "Syntax error in SQL statement"
+}
+```
+
+Triggered when SQL syntax is invalid.
+
+### Streaming Not Supported (400 Bad Request)
+
+```json
+{
+  "error_code": "STREAMING_NOT_SUPPORTED",
+  "error_message": "Streaming queries (SETTINGS stream = true) are not supported on the JSONL endpoint. Please use the Arrow Flight endpoint instead."
+}
+```
+
+The JSONL endpoint only supports batch queries. Use the Arrow Flight endpoint for streaming queries.
+
+## Client Examples
+
+### curl
+
+```bash
+# Basic query
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 10"
+
+# Save to file
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 1000" \
+  > blocks.jsonl
+
+# Filter with jq
+curl -X POST http://localhost:1603 \
+  --data "SELECT number, hash FROM eth_rpc.blocks LIMIT 10" \
+  | jq -r '.hash'
+```
+
+### Python (requests)
+
+```python
+import requests
+import json
+
+url = "http://localhost:1603"
+sql = "SELECT * FROM eth_rpc.blocks LIMIT 10"
+
+response = requests.post(url, data=sql)
+response.raise_for_status()
+
+# Parse JSONL response
+blocks = []
+for line in response.text.strip().split('\n'):
+    if line:
+        blocks.append(json.loads(line))
+
+for block in blocks:
+    print(f"Block {block['number']}: {block['hash']}")
+```
+
+### Python (with error handling)
+
+```python
+import requests
+import json
+
+def query_amp(sql: str) -> list:
+    """Execute SQL query and return results as list of dicts."""
+    url = "http://localhost:1603"
+    
+    response = requests.post(url, data=sql)
+    
+    # Check for errors
+    if response.status_code == 400:
+        error_data = response.json()
+        raise ValueError(
+            f"{error_data['error_code']}: {error_data['error_message']}"
+        )
+    
+    response.raise_for_status()
+    
+    # Parse JSONL
+    results = []
+    for line in response.text.strip().split('\n'):
+        if line:
+            results.append(json.loads(line))
+    
+    return results
+
+# Usage
+try:
+    blocks = query_amp("SELECT * FROM eth_rpc.blocks LIMIT 10")
+    print(f"Retrieved {len(blocks)} blocks")
+except ValueError as e:
+    print(f"Query error: {e}")
+```
+
+### JavaScript (Node.js)
+
+```javascript
+const fetch = require('node-fetch');
+
+async function queryAmp(sql) {
+    const response = await fetch('http://localhost:1603', {
+        method: 'POST',
+        body: sql,
+    });
+    
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(`${error.error_code}: ${error.error_message}`);
+    }
+    
+    const text = await response.text();
+    return text.split('\n')
+        .filter(line => line.trim())
+        .map(line => JSON.parse(line));
+}
+
+// Usage
+queryAmp('SELECT * FROM eth_rpc.blocks LIMIT 10')
+    .then(blocks => {
+        console.log(`Retrieved ${blocks.length} blocks`);
+        blocks.forEach(block => {
+            console.log(`Block ${block.number}: ${block.hash}`);
+        });
+    })
+    .catch(err => console.error('Query error:', err));
+```
+
+### Rust
+
+```rust
+use reqwest;
+use serde_json::Value;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let sql = "SELECT * FROM eth_rpc.blocks LIMIT 10";
+    
+    let response = client
+        .post("http://localhost:1603")
+        .body(sql)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        let error: Value = response.json().await?;
+        eprintln!("Query error: {:?}", error);
+        return Ok(());
+    }
+    
+    let text = response.text().await?;
+    
+    for line in text.lines() {
+        if !line.is_empty() {
+            let block: Value = serde_json::from_str(line)?;
+            println!("Block: {:?}", block);
+        }
+    }
+    
+    Ok(())
+}
+```
+
+## When to Use JSONL vs Arrow Flight
+
+Choose the JSONL endpoint when:
+
+- You need JSON output format
+- You're doing ad-hoc queries or exploration
+- You want the simplest possible integration
+- You're using tools that only support HTTP
+
+Choose the Arrow Flight endpoint when:
+
+- You need high performance and throughput
+- You want streaming queries with real-time updates
+- You need reorg detection and watermarking
+- You can consume Apache Arrow format
+- You want efficient columnar data transfer
+
+## Limitations
+
+- **Batch queries only**: Streaming queries (`SETTINGS stream = true`) are not supported. Use Arrow Flight for streaming.
+- **Single statements only**: Multiple SQL statements per request are rejected.
+- **JSON output only**: Results are always in NDJSON format.
+- **No compression**: Responses are not compressed by default (use HTTP compression headers if needed).
+- **Synchronous execution**: Query must complete before response is sent.
+
+## Compression
+
+To enable response compression, include the `Accept-Encoding` header:
+
+```bash
+curl -X POST http://localhost:1603 \
+  -H "Accept-Encoding: gzip" \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 1000" \
+  --compressed
+```
+
+The server will automatically compress the response if the client indicates support.
+
+## Health Check
+
+Verify the server is running:
+
+```bash
+curl http://localhost:1603/health
+# Returns: 200 OK
+```
+
+## See Also
+
+- [Arrow Flight Protocol](/api/query/flight-protocol) - High-performance gRPC alternative
+- [SQL Basics](/querying/sql-basics) - SQL syntax and features
+- [Query Overview](/querying/overview) - Introduction to querying in Amp

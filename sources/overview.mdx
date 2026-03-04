@@ -1,0 +1,153 @@
+---
+title: Data Sources Overview
+description: Learn about Amp's blockchain data extraction providers and how to configure them
+---
+
+Data sources (also called providers) are external blockchain data connections that enable Amp to extract raw blockchain data. They abstract connection details (endpoints, credentials, rate limits) from dataset definitions, allowing you to reuse configurations across multiple datasets.
+
+## Available Extractors
+
+Amp supports three types of blockchain data extractors:
+
+| Extractor | Protocol | Supported Chains | Use Case |
+|-----------|----------|------------------|----------|
+| **EVM RPC** | JSON-RPC | Ethereum and EVM-compatible chains | Standard blockchain data extraction via HTTP/WebSocket/IPC |
+| **Firehose** | gRPC streaming | EVM-compatible chains | High-throughput streaming with transaction traces |
+| **Solana** | JSON-RPC + CAR files | Solana | Solana blockchain with historical archive support |
+
+### EVM RPC
+
+Connects to Ethereum-compatible JSON-RPC endpoints for extracting blockchain data. Supports HTTP, WebSocket, and IPC connections with configurable batching and rate limiting.
+
+**Extracted tables**: `blocks`, `transactions`, `logs`
+
+[Learn more about EVM RPC →](/sources/evm-rpc)
+
+### Firehose
+
+StreamingFast's high-performance gRPC streaming protocol for blockchain data. Provides real-time data streaming with full transaction traces and call data.
+
+**Extracted tables**: `blocks`, `transactions`, `logs`, `calls`
+
+[Learn more about Firehose →](/sources/firehose)
+
+### Solana
+
+Solana blockchain extraction using a hybrid approach: historical data from Old Faithful CAR archive files and real-time data from Solana RPC endpoints.
+
+**Extracted tables**: `block_headers`, `transactions`, `messages`, `instructions`
+
+[Learn more about Solana →](/sources/solana)
+
+## How Providers Work
+
+Providers decouple dataset definitions from concrete data source configurations:
+
+```
+Dataset Manifest → Provider Resolution → Provider Config → Blockchain Connection
+     (kind, network)     (find match)       (credentials)      (data extraction)
+```
+
+### Provider Resolution
+
+When a dataset needs data, Amp automatically resolves the appropriate provider:
+
+1. Dataset requests provider by `(kind, network)` tuple (e.g., `evm-rpc` + `mainnet`)
+2. System finds all matching providers in the providers directory
+3. Providers are shuffled for load balancing
+4. Each is tried with environment variable substitution
+5. First successful connection is used
+
+### Benefits
+
+- **Reusability**: Multiple datasets share the same provider configuration
+- **Flexibility**: Switch endpoints without modifying dataset definitions
+- **Load Balancing**: Random selection among matching providers
+- **Security**: Credentials isolated in environment variables
+
+## Configuring Providers
+
+Providers are configured using TOML files stored in the `providers_dir` directory (configured in your main config file).
+
+### Basic Structure
+
+Each provider configuration requires:
+
+- **kind**: Provider type (`evm-rpc`, `firehose`, `solana`)
+- **network**: Blockchain network identifier (`mainnet`, `base`, `polygon`, etc.)
+- **url**: Connection endpoint (specific format depends on provider type)
+- Additional provider-specific fields (rate limits, authentication, etc.)
+
+### Example Provider Configuration
+
+```toml
+# providers/eth-mainnet-rpc.toml
+kind = "evm-rpc"
+network = "mainnet"
+url = "${ETH_MAINNET_RPC_URL}"
+rate_limit_per_minute = 600
+```
+
+### Environment Variables
+
+Provider URLs and credentials support environment variable substitution using `${VARIABLE_NAME}` syntax:
+
+```toml
+url = "${ETH_MAINNET_RPC_URL}"
+auth_token = "${FIREHOSE_ETH_MAINNET_TOKEN}"
+```
+
+This keeps sensitive credentials out of configuration files.
+
+## Provider Directory Structure
+
+Organize your provider configurations in the `providers_dir` directory:
+
+```
+providers/
+├── eth-mainnet-rpc.toml      # Ethereum mainnet RPC
+├── eth-mainnet-firehose.toml # Ethereum mainnet Firehose
+├── base-mainnet-rpc.toml     # Base L2 RPC
+├── polygon-mainnet-rpc.toml  # Polygon RPC
+└── solana-mainnet.toml       # Solana mainnet
+```
+
+### Naming Conventions
+
+Use descriptive names that indicate:
+- The blockchain network
+- The provider type
+- Any distinguishing characteristics (primary/fallback, rate-limited, etc.)
+
+Examples:
+- `eth-mainnet-rpc.toml`
+- `eth-mainnet-rpc-alchemy.toml`
+- `base-mainnet-firehose.toml`
+- `polygon-mainnet-rpc-backup.toml`
+
+## Network Identifiers
+
+Network identifiers should follow The Graph's networks registry:
+https://github.com/graphprotocol/networks-registry/blob/main/docs/networks-table.md
+
+Common network identifiers:
+- `mainnet` - Ethereum mainnet
+- `base` - Base L2
+- `arbitrum-one` - Arbitrum One
+- `polygon` - Polygon PoS
+- `optimism` - Optimism
+- `solana-mainnet` - Solana mainnet
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="EVM RPC" icon="ethereum" href="/sources/evm-rpc">
+    Configure Ethereum-compatible JSON-RPC providers
+  </Card>
+  <Card title="Firehose" icon="fire" href="/sources/firehose">
+    Set up high-throughput gRPC streaming
+  </Card>
+  <Card title="Solana" icon="S" href="/sources/solana">
+    Extract Solana blockchain data
+  </Card>
+</CardGroup>

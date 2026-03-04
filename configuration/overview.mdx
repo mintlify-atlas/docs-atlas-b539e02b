@@ -1,0 +1,234 @@
+---
+title: Configuration Overview
+description: Learn how to configure Amp with TOML files and environment variables
+---
+
+## Configuration File
+
+Amp uses a TOML configuration file to configure both the extraction and serving of datasets. The configuration file path is specified via the `AMP_CONFIG` environment variable.
+
+```bash
+export AMP_CONFIG=/path/to/config.toml
+```
+
+### Solo Mode Auto-Discovery
+
+For `ampd solo`, the configuration file is automatically discovered at `.amp/config.toml` if it exists. You can override this by passing `--config <path>` or setting the `AMP_CONFIG` environment variable.
+
+For other commands (`server`, `worker`, `controller`), the `--config` flag or `AMP_CONFIG` environment variable is required.
+
+### Sample Configuration
+
+A complete sample configuration with all available options is provided in the source repository at `docs/config.sample.toml`. Copy this file and edit it to match your deployment requirements.
+
+<Tip>
+Configuration files are not mandatory. You can provide all configuration values through environment variables instead. See the [Environment Variable Overrides](#environment-variable-overrides) section below.
+</Tip>
+
+## Key Configuration Directories
+
+Amp requires three object storage directories to be configured:
+
+<ParamField path="data_dir" type="string" required>
+  Where the actual dataset parquet tables are stored once extracted. Can be initially empty.
+  
+  Supports both filesystem paths and object store URLs (S3, GCS, Azure).
+  
+  ```toml
+  data_dir = "data"
+  # or
+  data_dir = "s3://my-bucket/data"
+  ```
+</ParamField>
+
+<ParamField path="manifests_dir" type="string" required>
+  Directory containing dataset definitions (manifest JSON files). This is the input to the extraction process.
+  
+  ```toml
+  manifests_dir = "manifests"
+  ```
+</ParamField>
+
+<ParamField path="providers_dir" type="string" required>
+  Directory containing provider configurations for external services like Firehose and RPC endpoints. Each provider is configured as a separate TOML file.
+  
+  ```toml
+  providers_dir = "providers"
+  ```
+</ParamField>
+
+Although the initial setup with three directories may seem cumbersome, it allows for a highly flexible configuration where datasets, providers, and data can be stored in different locations or object stores.
+
+## Service Addresses
+
+The following optional configuration keys control the hostname and port that each service binds to:
+
+<ParamField path="flight_addr" type="string" default="0.0.0.0:1602">
+  Arrow Flight RPC server address for high-performance binary queries.
+  
+  ```toml
+  flight_addr = "0.0.0.0:1602"
+  ```
+</ParamField>
+
+<ParamField path="jsonl_addr" type="string" default="0.0.0.0:1603">
+  JSON Lines server address for HTTP-based queries.
+  
+  ```toml
+  jsonl_addr = "0.0.0.0:1603"
+  ```
+</ParamField>
+
+<ParamField path="admin_api_addr" type="string" default="0.0.0.0:1610">
+  Admin API server address for management operations.
+  
+  ```toml
+  admin_api_addr = "0.0.0.0:1610"
+  ```
+</ParamField>
+
+## Environment Variable Overrides
+
+All values in the configuration file can be overridden from the environment by prefixing the environment variable name with `AMP_CONFIG_`.
+
+### Top-Level Values
+
+For top-level configuration values, use uppercase with the `AMP_CONFIG_` prefix:
+
+```bash
+# Override data_dir
+export AMP_CONFIG_DATA_DIR="s3://my-bucket/data"
+
+# Override manifests_dir
+export AMP_CONFIG_MANIFESTS_DIR="gs://my-bucket/manifests"
+
+# Override providers_dir
+export AMP_CONFIG_PROVIDERS_DIR="./providers"
+```
+
+### Nested Configuration Values
+
+For nested configuration values, use double underscores (`__`) to represent the nesting hierarchy:
+
+```bash
+# Override metadata_db.url
+export AMP_CONFIG_METADATA_DB__URL="postgresql://user:pass@host/db"
+
+# Override metadata_db.pool_size
+export AMP_CONFIG_METADATA_DB__POOL_SIZE=20
+
+# Override writer.compression
+export AMP_CONFIG_WRITER__COMPRESSION="zstd(3)"
+
+# Override opentelemetry.metrics_url
+export AMP_CONFIG_OPENTELEMETRY__METRICS_URL="http://localhost:4318/v1/metrics"
+```
+
+### Mixing Configuration File and Environment Variables
+
+You can use a configuration file for base settings and override specific values with environment variables. This is useful for:
+
+- **Development**: Use a local config file with environment-specific overrides
+- **Production**: Store secrets in environment variables while keeping other config in files
+- **CI/CD**: Override database URLs and object store paths per environment
+
+## Memory and Performance
+
+<ParamField path="max_mem_mb" type="integer" default="0">
+  Global memory limit for all queries in MB. A value of 0 means unlimited.
+  
+  ```toml
+  max_mem_mb = 8192  # 8GB total limit
+  ```
+</ParamField>
+
+<ParamField path="query_max_mem_mb" type="integer" default="0">
+  Per-query memory limit in MB. A value of 0 means unlimited per query.
+  
+  ```toml
+  query_max_mem_mb = 2048  # 2GB per query
+  ```
+</ParamField>
+
+<ParamField path="spill_location" type="array" default="[]">
+  Paths for DataFusion temporary files for spill-to-disk when memory limits are exceeded.
+  
+  ```toml
+  spill_location = ["/tmp/amp-spill", "/mnt/ssd/amp-spill"]
+  ```
+</ParamField>
+
+## Operational Timing
+
+<ParamField path="poll_interval_secs" type="float" default="1.0">
+  Polling interval for new blocks during extraction in seconds.
+  
+  ```toml
+  poll_interval_secs = 0.5  # Poll every 500ms
+  ```
+</ParamField>
+
+<ParamField path="microbatch_max_interval" type="integer" default="100000">
+  Maximum interval for derived dataset dump microbatches in blocks.
+  
+  ```toml
+  microbatch_max_interval = 50000
+  ```
+</ParamField>
+
+<ParamField path="server_microbatch_max_interval" type="integer" default="1000">
+  Maximum interval for streaming server microbatches in blocks.
+  
+  ```toml
+  server_microbatch_max_interval = 500
+  ```
+</ParamField>
+
+<ParamField path="keep_alive_interval" type="integer" default="30">
+  Keep-alive interval for streaming server in seconds. Minimum value is 30.
+  
+  ```toml
+  keep_alive_interval = 60
+  ```
+</ParamField>
+
+## Logging
+
+Logging verbosity is controlled by the `AMP_LOG` environment variable (not in the config file):
+
+```bash
+# Set log level (error, warn, info, debug, trace)
+export AMP_LOG=info
+```
+
+For more fine-grained log filtering, use the standard `RUST_LOG` environment variable:
+
+```bash
+# Only show debug logs from the worker module
+export RUST_LOG=amp_worker=debug,warn
+```
+
+## Configuration Validation
+
+Amp validates the configuration file on startup and will report errors if:
+
+- Required fields are missing
+- Field types are incorrect
+- Object store URLs are malformed
+- Service addresses are invalid
+
+Check the startup logs for configuration validation errors.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Metadata Database" icon="database" href="/configuration/metadata-database">
+    Configure PostgreSQL for metadata storage
+  </Card>
+  <Card title="Storage" icon="cloud" href="/configuration/storage">
+    Set up object storage backends
+  </Card>
+  <Card title="Telemetry" icon="chart-line" href="/configuration/telemetry">
+    Configure OpenTelemetry and Grafana
+  </Card>
+</CardGroup>

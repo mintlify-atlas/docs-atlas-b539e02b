@@ -1,0 +1,349 @@
+---
+title: Telemetry Configuration
+description: Configure OpenTelemetry metrics and traces for Amp observability
+---
+
+## Overview
+
+Amp provides comprehensive observability through OpenTelemetry, exporting metrics and traces to compatible backends. The built-in telemetry stack includes support for Prometheus metrics and distributed tracing.
+
+## OpenTelemetry Configuration
+
+Configure OpenTelemetry in the `[opentelemetry]` section:
+
+```toml
+[opentelemetry]
+metrics_url = "http://localhost:4318/v1/metrics"
+metrics_export_interval_secs = 60.0
+trace_url = "http://localhost:4318/v1/traces"
+trace_ratio = 1.0
+```
+
+### Configuration Fields
+
+<ParamField path="opentelemetry.metrics_url" type="string">
+  Remote OpenTelemetry metrics collector endpoint (binary HTTP protocol).
+  
+  The endpoint should accept OTLP metrics in binary format over HTTP.
+  
+  ```toml
+  [opentelemetry]
+  metrics_url = "http://localhost:4318/v1/metrics"
+  ```
+  
+  Environment variable override:
+  ```bash
+  export AMP_CONFIG_OPENTELEMETRY__METRICS_URL="http://otel-collector:4318/v1/metrics"
+  ```
+</ParamField>
+
+<ParamField path="opentelemetry.metrics_export_interval_secs" type="float" default="60.0">
+  Interval in seconds between metric exports to the collector.
+  
+  Lower values provide fresher metrics but increase network traffic.
+  
+  ```toml
+  [opentelemetry]
+  metrics_export_interval_secs = 30.0  # Export every 30 seconds
+  ```
+</ParamField>
+
+<ParamField path="opentelemetry.trace_url" type="string">
+  Remote OpenTelemetry traces collector endpoint (HTTP protocol).
+  
+  The endpoint should accept OTLP traces over HTTP.
+  
+  ```toml
+  [opentelemetry]
+  trace_url = "http://localhost:4318/v1/traces"
+  ```
+  
+  Environment variable override:
+  ```bash
+  export AMP_CONFIG_OPENTELEMETRY__TRACE_URL="http://otel-collector:4318/v1/traces"
+  ```
+</ParamField>
+
+<ParamField path="opentelemetry.trace_ratio" type="float" default="1.0">
+  Ratio of traces to sample (0.0 to 1.0).
+  
+  - `1.0`: Sample all traces (100%)
+  - `0.1`: Sample 10% of traces
+  - `0.01`: Sample 1% of traces
+  
+  Lower ratios reduce overhead in high-traffic environments.
+  
+  ```toml
+  [opentelemetry]
+  trace_ratio = 0.1  # Sample 10% of traces
+  ```
+</ParamField>
+
+## Local Development with Grafana
+
+For local development and testing, Amp provides a pre-configured Grafana telemetry stack using Docker Compose.
+
+### Starting the Stack
+
+Start the Grafana OTEL stack:
+
+```bash
+docker-compose up -d
+```
+
+This runs the `grafana/otel-lgtm` image, which includes:
+
+- **Grafana**: Visualization and dashboards (port 3000)
+- **OpenTelemetry Collector**: Receives metrics and traces
+- **Prometheus**: Stores metrics
+- **Tempo**: Stores traces
+
+Learn more about the image: [grafana/docker-otel-lgtm](https://github.com/grafana/docker-otel-lgtm/)
+
+### Connecting Amp to Grafana Stack
+
+Configure Amp to send telemetry to the local Grafana stack:
+
+```toml
+[opentelemetry]
+trace_url = "http://localhost:4317/v1/traces"
+metrics_url = "http://localhost:4318/v1/metrics"
+```
+
+**Port notes**:
+
+- **4317**: gRPC endpoint (for `trace_url` in this setup)
+- **4318**: HTTP endpoint (for `metrics_url`)
+
+Ensure your `docker-compose.yaml` exposes these ports (default configuration does).
+
+### Accessing Grafana
+
+Open Grafana in your browser:
+
+```
+http://localhost:3000
+```
+
+**Default credentials**:
+
+- Username: `admin`
+- Password: `admin` (you'll be prompted to change it)
+
+## Metrics
+
+Amp exports comprehensive metrics for monitoring:
+
+### Server Metrics
+
+- **Query execution**: Query count, duration, errors
+- **Streaming**: Active streams, microbatch size/duration
+- **HTTP metrics**: Request count, duration, status codes (via OpenTelemetry instrumentation)
+
+### Worker Metrics
+
+- **Extraction**: Rows ingested, blocks processed, extraction duration
+- **File operations**: Files written, bytes written
+- **Compaction**: Files compacted, compaction success/failures
+- **Garbage collection**: Files deleted, expired files, collection success/failures
+
+### Extractor Metrics
+
+- **EVM RPC**: RPC requests, errors, duration
+- **Firehose**: Blocks received, stream errors, connection status
+
+For a complete list of metrics, see the [Metrics Reference](/admin/monitoring).
+
+## Traces
+
+Distributed traces help debug query execution and extraction flows:
+
+### Trace Coverage
+
+- **Query execution**: Full query lifecycle from request to response
+- **Extraction jobs**: Block fetching, parsing, writing
+- **File operations**: Parquet writes, compaction, garbage collection
+- **RPC calls**: External provider requests
+
+### Viewing Traces in Grafana
+
+1. Navigate to **Explore** in Grafana
+2. Select **Tempo** as the data source
+3. Search by:
+   - **Trace ID**: Direct trace lookup
+   - **Service name**: Filter by component (e.g., `amp-server`, `amp-worker`)
+   - **Operation**: Filter by operation type
+   - **Duration**: Find slow traces
+
+## Custom Dashboards
+
+Amp includes pre-configured Grafana dashboards in the `grafana/dashboards/` directory.
+
+### Loading Custom Dashboards
+
+1. Navigate to: `http://localhost:3000/dashboards/import`
+2. Upload the dashboard JSON file or paste its contents
+3. Select **Prometheus** as the data source
+4. Click **Import**
+
+### Creating New Dashboards
+
+1. Create a dashboard in Grafana UI
+2. Click **Share** → **Export** → **Save to file**
+3. Save the JSON file to `grafana/dashboards/` in the repository
+4. The dashboard will be automatically loaded on next `docker-compose up`
+
+<Tip>
+The `docker-compose.yaml` is configured to automatically load dashboards from `grafana/dashboards/` on startup.
+</Tip>
+
+### Available Pre-Configured Dashboards
+
+Check the `grafana/dashboards/` directory in the source repository for:
+
+- **Worker Overview**: Extraction metrics, job status, throughput
+- **Server Overview**: Query performance, active streams, error rates
+- **Storage Overview**: File counts, bytes written, compaction status
+
+## Production Deployments
+
+### Using Grafana Cloud
+
+Configure Amp to send telemetry to Grafana Cloud:
+
+```toml
+[opentelemetry]
+metrics_url = "https://<instance>.grafana.net/otlp/v1/metrics"
+trace_url = "https://<instance>.grafana.net/otlp/v1/traces"
+```
+
+Add authentication headers via OpenTelemetry Collector or use the Grafana Cloud OTLP endpoint with authentication.
+
+### Using Custom OpenTelemetry Collector
+
+Deploy your own OpenTelemetry Collector:
+
+```toml
+[opentelemetry]
+metrics_url = "http://otel-collector.example.com:4318/v1/metrics"
+trace_url = "http://otel-collector.example.com:4318/v1/traces"
+```
+
+The collector can forward to multiple backends (Prometheus, Tempo, Jaeger, etc.).
+
+### Sampling Configuration for Production
+
+Reduce trace volume in production:
+
+```toml
+[opentelemetry]
+trace_ratio = 0.01  # Sample 1% of traces
+```
+
+**Sampling strategies**:
+
+- **High traffic**: 0.01 (1%) or lower
+- **Medium traffic**: 0.1 (10%)
+- **Low traffic / debugging**: 1.0 (100%)
+
+### Security Considerations
+
+<Warning>
+Never expose OpenTelemetry endpoints directly to the internet. Use authentication, VPCs, or private networks.
+</Warning>
+
+**Best practices**:
+
+- Use HTTPS endpoints for remote collectors
+- Implement authentication at the collector level
+- Restrict network access to telemetry endpoints
+- Avoid sending sensitive data in trace attributes
+- Use collector-side filtering for PII
+
+## Alerting
+
+Set up alerts in Grafana for:
+
+### Critical Alerts
+
+- **Extraction failures**: Worker job failures
+- **Database connection failures**: Metadata database unavailable
+- **High error rates**: Query errors above threshold
+- **Compaction failures**: Failed compaction jobs
+
+### Warning Alerts
+
+- **High query latency**: P95 latency above threshold
+- **Storage growth**: Rapid increase in bytes written
+- **File count growth**: Too many small files (compaction needed)
+- **Memory usage**: High memory usage on server or workers
+
+### Example Alert Rules
+
+```yaml
+# Query error rate > 5%
+alert: HighQueryErrorRate
+expr: rate(amp_query_errors_total[5m]) / rate(amp_queries_total[5m]) > 0.05
+for: 5m
+labels:
+  severity: warning
+
+# Worker extraction failures
+alert: ExtractionFailures
+expr: increase(amp_worker_job_failures_total[10m]) > 0
+for: 1m
+labels:
+  severity: critical
+```
+
+## Disabling Telemetry
+
+To disable telemetry, simply omit the `[opentelemetry]` section from your config file or leave the URLs empty:
+
+```toml
+# Telemetry disabled (no opentelemetry section)
+```
+
+Or explicitly set empty values:
+
+```toml
+[opentelemetry]
+# Empty URLs = no telemetry
+metrics_url = ""
+trace_url = ""
+```
+
+## Troubleshooting
+
+### Metrics Not Appearing
+
+1. **Check configuration**: Verify `metrics_url` is correct
+2. **Check collector logs**: Ensure collector is receiving metrics
+3. **Check network**: Verify connectivity from Amp to collector
+4. **Check interval**: Metrics export every `metrics_export_interval_secs`
+
+### Traces Not Appearing
+
+1. **Check configuration**: Verify `trace_url` is correct
+2. **Check sampling**: Ensure `trace_ratio` is > 0
+3. **Check collector**: Verify collector is configured for traces
+4. **Generate traffic**: Some traces may not appear until traffic flows
+
+### High Memory Usage
+
+If telemetry causes high memory usage:
+
+1. Reduce `trace_ratio` to sample fewer traces
+2. Increase `metrics_export_interval_secs` to export less frequently
+3. Check collector backpressure and buffering
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Metrics Reference" icon="chart-line" href="/reference/metrics">
+    Complete list of available metrics
+  </Card>
+  <Card title="Configuration Overview" icon="gear" href="/configuration/overview">
+    Back to configuration overview
+  </Card>
+</CardGroup>

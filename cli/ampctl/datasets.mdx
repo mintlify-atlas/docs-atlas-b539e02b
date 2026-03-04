@@ -1,0 +1,290 @@
+---
+title: ampctl datasets
+description: Dataset lifecycle management commands
+---
+
+## Overview
+
+Dataset commands provide full lifecycle management for blockchain datasets. Operators can register manifests as named datasets with version tags, deploy datasets to start extraction jobs, inspect registered datasets and their versions, retrieve raw manifests, and restore dataset metadata from object storage after recovery scenarios.
+
+## Key Concepts
+
+- **Dataset Reference**: Identifies a dataset as `namespace/name@version` (e.g., `ethereum/mainnet@1.0.0`)
+- **Version Tag**: Semantic version (e.g., `1.0.0`) or special tags `latest` and `dev` (system-managed)
+- **Deployment**: Scheduling an extraction job that syncs blockchain data for a dataset
+- **Restore**: Re-indexing dataset metadata from existing data in object storage
+
+## Commands
+
+### ampctl dataset register
+
+Register a dataset manifest with a version tag.
+
+```bash
+ampctl dataset register <DATASET_REF> <MANIFEST_PATH> [OPTIONS]
+```
+
+**Aliases:** `reg`
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name` (e.g., `ethereum/mainnet`)
+</ParamField>
+
+<ParamField path="MANIFEST_PATH" type="string" required>
+  Path to manifest JSON file (local path or object storage URL like `s3://bucket/manifest.json`)
+</ParamField>
+
+<ParamField path="--tag, -t" type="string">
+  Version tag for the dataset (e.g., `1.0.0`). Without this flag, only the `dev` tag is updated.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Register a dataset (updates "dev" tag)
+ampctl dataset register my_namespace/my_dataset ./manifest.json
+
+# Register and tag with a semantic version
+ampctl dataset register my_namespace/my_dataset ./manifest.json --tag 1.0.0
+
+# Using the alias
+ampctl dataset reg my_namespace/my_dataset ./manifest.json -t 1.0.0
+
+# Manifest can be loaded from object storage
+ampctl dataset register my_namespace/my_dataset s3://bucket/manifest.json --tag 2.0.0
+```
+
+### ampctl dataset deploy
+
+Deploy a dataset to start extraction.
+
+```bash
+ampctl dataset deploy <DATASET_REF> [OPTIONS]
+```
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name@version` (e.g., `ethereum/mainnet@1.0.0`)
+</ParamField>
+
+<ParamField path="--end-block" type="string">
+  Stop extraction at a specific block. Options:
+  - `latest` - Stop at the latest block at deployment time
+  - `<number>` - Stop at a specific block number (e.g., `5000000`)
+  - `<negative>` - Stay N blocks behind chain tip (e.g., `-100`)
+  - If not specified, syncing runs continuously
+</ParamField>
+
+<ParamField path="--parallelism" type="number">
+  Number of parallel workers to use for extraction
+</ParamField>
+
+<ParamField path="--worker-id" type="string">
+  Assign the job to a specific worker node by ID
+</ParamField>
+
+**Examples:**
+
+```bash
+# Deploy with continuous syncing (default)
+ampctl dataset deploy my_namespace/my_dataset@1.0.0
+
+# Stop at the latest block at deployment time
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --end-block latest
+
+# Stop at a specific block number
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --end-block 5000000
+
+# Stay 100 blocks behind chain tip
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --end-block -100
+
+# Run with multiple parallel workers
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --parallelism 4
+
+# Assign to a specific worker
+ampctl dataset deploy my_namespace/my_dataset@1.0.0 --worker-id my-worker
+```
+
+### ampctl dataset list
+
+List all registered datasets.
+
+```bash
+ampctl dataset list [OPTIONS]
+```
+
+**Aliases:** `ls`
+
+**Examples:**
+
+```bash
+ampctl dataset list
+ampctl dataset ls  # alias
+ampctl dataset list --json  # JSON output
+```
+
+**Output:**
+```
+namespace/dataset1 (latest: 1.2.0, versions: 1.0.0, 1.1.0, 1.2.0)
+namespace/dataset2 (latest: 2.0.0, versions: 1.0.0, 2.0.0)
+```
+
+### ampctl dataset inspect
+
+Inspect a specific dataset version.
+
+```bash
+ampctl dataset inspect <DATASET_REF> [OPTIONS]
+```
+
+**Aliases:** `get`
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name[@version]`. If version is omitted, defaults to `latest`.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Inspect latest version
+ampctl dataset inspect my_namespace/my_dataset
+
+# Inspect a specific version
+ampctl dataset inspect my_namespace/my_dataset@1.2.0
+
+# Inspect the dev version
+ampctl dataset inspect my_namespace/my_dataset@dev
+
+# Using the alias
+ampctl dataset get my_namespace/my_dataset@latest
+
+# Extract specific fields with jq
+ampctl dataset inspect my_namespace/my_dataset --json | jq '.kind'
+```
+
+### ampctl dataset versions
+
+List all versions for a dataset.
+
+```bash
+ampctl dataset versions <DATASET_REF>
+```
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name`
+</ParamField>
+
+**Examples:**
+
+```bash
+ampctl dataset versions my_namespace/my_dataset
+ampctl dataset versions my_namespace/my_dataset --json
+```
+
+**Output:**
+```
+Version    Manifest Hash                                            Created At
+1.0.0      abc123def456...                                          2024-01-15T10:30:00Z
+1.1.0      def789ghi012...                                          2024-02-20T14:45:00Z
+1.2.0      ghi345jkl678...                                          2024-03-01T09:15:00Z
+```
+
+### ampctl dataset manifest
+
+Retrieve the raw manifest JSON for a dataset version.
+
+```bash
+ampctl dataset manifest <DATASET_REF>
+```
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name[@version]`. If version is omitted, defaults to `latest`.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Latest version manifest
+ampctl dataset manifest my_namespace/my_dataset
+
+# Specific version
+ampctl dataset manifest my_namespace/my_dataset@1.2.0
+
+# Save to file
+ampctl dataset manifest my_namespace/my_dataset@1.2.0 > manifest.json
+```
+
+### ampctl dataset restore
+
+Restore dataset metadata from object storage.
+
+```bash
+ampctl dataset restore <DATASET_REF> [OPTIONS]
+```
+
+<ParamField path="DATASET_REF" type="string" required>
+  Dataset reference in format `namespace/name@version`
+</ParamField>
+
+<ParamField path="--table" type="string">
+  Restore only a specific table (discovers latest revision from storage)
+</ParamField>
+
+<ParamField path="--location-id" type="number">
+  Restore a specific table with a specific location ID
+</ParamField>
+
+**Use Cases:**
+- Recovery after metadata loss
+- Setting up new systems with pre-existing data
+- Re-syncing after storage restoration
+
+**Examples:**
+
+```bash
+# Restore all tables for a specific version
+ampctl dataset restore my_namespace/my_dataset@1.0.0
+
+# Restore latest version
+ampctl dataset restore my_namespace/my_dataset@latest
+
+# Restore a single table (discovers latest revision from storage)
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks
+
+# Restore a single table with a specific location ID
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks --location-id 42
+```
+
+## Advanced Workflow: Restore from Custom Storage Path
+
+When table data exists at non-default storage paths (e.g., after migration, custom storage layout, or importing data from another system), use this multi-step flow:
+
+```bash
+# Step 1: Register the dataset manifest (if not already registered)
+ampctl dataset register my_namespace/my_dataset ./manifest.json --tag 1.0.0
+
+# Step 2: Register each table revision with a custom storage path
+#   Creates an inactive revision record and returns a location_id
+ampctl table register my_namespace/my_dataset@1.0.0 blocks custom/path/to/blocks
+# → location_id: 42
+ampctl table register my_namespace/my_dataset@1.0.0 transactions custom/path/to/transactions
+# → location_id: 43
+
+# Step 3: Restore file metadata from storage for each table
+#   Scans the storage path and indexes Parquet file metadata into the metadata DB
+ampctl table restore 42
+ampctl table restore 43
+
+# Step 4: Activate each restored table revision via dataset restore
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table blocks --location-id 42
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --table transactions --location-id 43
+```
+
+## JSON Output
+
+All dataset commands support JSON output for scripting:
+
+```bash
+ampctl dataset list --json
+ampctl dataset inspect my_namespace/my_dataset --json | jq '.kind'
+ampctl dataset restore my_namespace/my_dataset@1.0.0 --json
+```

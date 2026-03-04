@@ -1,122 +1,150 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Amp",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#8245fc",
+    "light": "#c499fc"
   },
-  "favicon": "/favicon.svg",
+
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/edgeandnode/amp"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/edgeandnode/amp"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/architecture",
+              "concepts/data-flow",
+              "concepts/datasets",
+              "concepts/providers"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Configuration",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "configuration/overview",
+              "configuration/metadata-database",
+              "configuration/storage",
+              "configuration/telemetry"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Querying Data",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "querying/overview",
+              "querying/sql-basics",
+              "querying/arrow-flight",
+              "querying/json-lines",
+              "querying/streaming"
+            ]
+          },
+          {
+            "group": "Data Sources",
+            "pages": [
+              "sources/overview",
+              "sources/evm-rpc",
+              "sources/firehose",
+              "sources/solana"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/overview",
+              "admin/datasets",
+              "admin/jobs",
+              "admin/workers",
+              "admin/monitoring"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/modes",
+              "deployment/solo-mode",
+              "deployment/distributed-mode",
+              "deployment/production"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "CLI Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "ampd",
             "pages": [
-              "api-reference/introduction"
+              "cli/ampd/overview",
+              "cli/ampd/server",
+              "cli/ampd/worker",
+              "cli/ampd/controller",
+              "cli/ampd/solo",
+              "cli/ampd/migrate"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "ampctl",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "cli/ampctl/overview",
+              "cli/ampctl/datasets",
+              "cli/ampctl/jobs",
+              "cli/ampctl/workers",
+              "cli/ampctl/providers"
+            ]
+          },
+          {
+            "group": "ampup",
+            "pages": [
+              "cli/ampup/overview",
+              "cli/ampup/install",
+              "cli/ampup/manage"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Admin API",
+            "pages": [
+              "api/admin/overview",
+              "api/admin/datasets",
+              "api/admin/jobs",
+              "api/admin/workers",
+              "api/admin/providers"
+            ]
+          },
+          {
+            "group": "Query API",
+            "pages": [
+              "api/query/flight-protocol",
+              "api/query/jsonl-protocol"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

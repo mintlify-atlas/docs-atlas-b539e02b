@@ -1,0 +1,428 @@
+---
+title: Worker Management
+description: Monitor and troubleshoot distributed worker nodes
+---
+
+Worker management provides visibility into the distributed extraction workers that execute data extraction jobs. Operators can list all registered workers, inspect worker details including version information, monitor worker health through heartbeats, and troubleshoot worker issues.
+
+## Key Concepts
+
+<Card title="Worker" icon="server">
+  A process running `ampd worker` that executes extraction jobs
+</Card>
+
+**Worker Components:**
+- **Node ID** - Unique identifier (format: `^[a-zA-Z][a-zA-Z0-9_\-\.]*$`)
+- **Heartbeat** - Health signal sent every 1 second to metadata database
+- **Worker Info** - Build metadata (version, commit SHA, build date)
+- **Advisory Lock** - PostgreSQL lock preventing duplicate node IDs
+
+**Lifecycle Timestamps:**
+- `created_at` - First registration (never changes)
+- `registered_at` - Last re-registration (updates on restart)
+- `heartbeat_at` - Last heartbeat (updates every 1 second)
+
+## Core Operations
+
+<CardGroup cols={2}>
+  <Card title="List Workers" icon="list">
+    View all registered workers
+  </Card>
+  <Card title="Inspect Worker" icon="magnifying-glass">
+    Get detailed worker information
+  </Card>
+  <Card title="Monitor Health" icon="heart-pulse">
+    Track heartbeats and availability
+  </Card>
+  <Card title="Troubleshoot" icon="wrench">
+    Debug worker issues
+  </Card>
+</CardGroup>
+
+## List Workers
+
+View all registered workers and their last heartbeat times:
+
+<CodeGroup>
+```bash CLI
+# List all workers
+ampctl worker list
+ampctl worker ls  # alias
+
+# JSON output
+ampctl worker list --json
+```
+
+```bash API
+# List workers via API
+curl http://localhost:1610/workers
+```
+</CodeGroup>
+
+**Example Output:**
+```
+worker-01h2xcejqtf2nbrexx3vqjhp41 (last heartbeat: 2026-03-04T17:20:15Z)
+indexer-node-1 (last heartbeat: 2026-03-04T17:18:45Z)
+eu-west-1a-worker (last heartbeat: 2026-03-04T17:20:10Z)
+```
+
+**Response:**
+```json
+{
+  "workers": [
+    {
+      "node_id": "worker-01h2xcejqtf2nbrexx3vqjhp41",
+      "heartbeat_at": "2026-03-04T17:20:15Z"
+    },
+    {
+      "node_id": "indexer-node-1",
+      "heartbeat_at": "2026-03-04T17:18:45Z"
+    }
+  ]
+}
+```
+
+## Inspect Worker
+
+Get detailed information including build version and timestamps:
+
+<CodeGroup>
+```bash CLI
+# Inspect specific worker
+ampctl worker inspect worker-01
+ampctl worker get worker-01  # alias
+
+# JSON output
+ampctl worker inspect worker-01 --json
+
+# Extract specific fields
+ampctl worker inspect worker-01 --json | jq '.info.version'
+```
+
+```bash API
+# Get worker details
+curl http://localhost:1610/workers/worker-01
+```
+</CodeGroup>
+
+**Example Output:**
+```
+Node ID: worker-01h2xcejqtf2nbrexx3vqjhp41
+Created: 2026-01-01T12:00:00Z
+Registered: 2026-03-04T16:45:30Z
+Heartbeat: 2026-03-04T17:20:15Z
+
+Worker Info:
+  Version: v0.0.22-15-g8b065bde
+  Commit: 8b065bde9c1a2f3e4d5c6b7a8e9f0a1b2c3d4e5f
+  Commit Timestamp: 2026-03-04T14:30:00Z
+  Build Date: 2026-03-04T15:45:30Z
+```
+
+**Response:**
+```json
+{
+  "node_id": "worker-01h2xcejqtf2nbrexx3vqjhp41",
+  "created_at": "2026-01-01T12:00:00Z",
+  "registered_at": "2026-03-04T16:45:30Z",
+  "heartbeat_at": "2026-03-04T17:20:15Z",
+  "info": {
+    "version": "v0.0.22-15-g8b065bde",
+    "commit_sha": "8b065bde9c1a2f3e4d5c6b7a8e9f0a1b2c3d4e5f",
+    "commit_timestamp": "2026-03-04T14:30:00Z",
+    "build_date": "2026-03-04T15:45:30Z"
+  }
+}
+```
+
+## Monitor Worker Health
+
+Workers send heartbeats every **1 second**. A worker is considered active if its heartbeat is recent (typically within 5-30 seconds).
+
+### Check Worker Status
+
+```bash
+# List workers and check heartbeats
+ampctl worker list
+
+# Workers with recent heartbeats (< 10s ago) are healthy
+# Workers with old heartbeats may be stalled or disconnected
+```
+
+### Identify Stalled Workers
+
+```bash
+# Find workers without recent heartbeats
+ampctl worker list --json | jq -r '.workers[] |
+  select((.heartbeat_at | fromdateiso8601) < (now - 30)) |
+  "⚠ Stale worker: \(.node_id) (last seen: \(.heartbeat_at))"'
+```
+
+### Continuous Monitoring
+
+```bash
+# Watch worker heartbeats in real-time
+watch -n 5 'ampctl worker list'
+```
+
+## Troubleshooting Workers
+
+### Check Worker Versions
+
+<CodeGroup>
+```bash Single Worker
+# Get version for specific worker
+ampctl worker inspect worker-01 --json | jq -r '.info.version'
+```
+
+```bash All Workers
+# List all workers with versions
+ampctl worker list --json | jq -r '.workers[].node_id' | while read worker; do
+  version=$(ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '.info.version // "unknown"')
+  echo "$worker: $version"
+done
+```
+</CodeGroup>
+
+### Identify Version Mismatches
+
+```bash
+# Get unique versions across all workers
+ampctl worker list --json | jq -r '.workers[].node_id' | while read worker; do
+  ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '.info.version // "unknown"'
+done | sort -u
+
+# Expected: Single version if fleet is uniform
+# Multiple lines indicate version mismatch
+```
+
+### Verify Deployment Rollout
+
+```bash
+# Count workers by version
+ampctl worker list --json | jq -r '.workers[].node_id' | while read worker; do
+  ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '.info.version // "unknown"'
+done | sort | uniq -c
+
+# Example output:
+#   3 v0.0.22-15-g8b065bde
+#   2 v0.0.21-8-ga1b2c3d4
+```
+
+### Detect Worker Restarts
+
+Compare `created_at` and `registered_at` timestamps:
+
+```bash
+ampctl worker inspect worker-01 --json | jq -r '
+  "Created:     \(.created_at)",
+  "Registered:  \(.registered_at)",
+  "Heartbeat:   \(.heartbeat_at)"'
+
+# If registered_at > created_at, worker has restarted
+# Large gap = long-running, small gap = recent restart
+```
+
+### Calculate Worker Uptime
+
+```bash
+# Time since last restart (registered_at)
+ampctl worker inspect worker-01 --json | jq -r '
+  (.registered_at | fromdateiso8601) as $reg |
+  (now - $reg) / 86400 | floor |
+  "Uptime: \(.) days since last restart"'
+```
+
+## Common Troubleshooting Scenarios
+
+### Scenario 1: Worker Not Accepting Jobs
+
+```bash
+# Step 1: Check if worker is registered
+ampctl worker list | grep worker-01
+
+# Step 2: Verify heartbeat is recent (< 10 seconds old)
+ampctl worker inspect worker-01
+
+# Step 3: Check worker version matches deployment
+ampctl worker inspect worker-01 --json | jq -r '.info'
+
+# Common causes:
+# - Heartbeat stopped (worker crashed or network issue)
+# - Worker running different version
+# - Database connection lost
+```
+
+### Scenario 2: Worker Disappeared
+
+```bash
+# Check last known state
+ampctl worker inspect worker-01
+
+# Look for:
+# - Last heartbeat timestamp (how long ago?)
+# - Registered vs created timestamps (restart pattern?)
+# - Version info (expected version?)
+
+# If heartbeat > 60s old:
+# - Worker process likely crashed or stopped
+# - Check worker logs for errors
+# - Verify network connectivity to metadata DB
+```
+
+### Scenario 3: Version Mismatch Issues
+
+```bash
+# List all workers with versions and heartbeats
+ampctl worker list --json | jq -r '.workers[] | "\(.node_id): \(.heartbeat_at)"' | \
+  while IFS=: read -r worker rest; do
+    version=$(ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '.info.version // "unknown"')
+    echo "$worker: $version"
+  done
+
+# Identify outdated workers needing upgrade
+# Verify all workers running compatible versions
+```
+
+### Scenario 4: Duplicate Node IDs
+
+The system prevents duplicate node IDs using PostgreSQL advisory locks:
+
+- Each worker acquires exclusive lock on its node_id
+- Second worker with same ID fails to acquire lock
+- Registration fails with lock conflict error
+
+```bash
+# Verify no duplicate node IDs
+ampctl worker list --json | jq -r '.workers[].node_id' | sort | uniq -d
+
+# Empty output = No duplicates ✓
+# IDs shown = Database integrity issue (shouldn't happen)
+```
+
+## Monitoring Automation
+
+### Health Check Script
+
+```bash
+#!/bin/bash
+# check-workers.sh - Verify all workers are healthy
+
+THRESHOLD_SECONDS=30
+EXIT_CODE=0
+
+echo "Checking worker health..."
+
+ampctl worker list --json | jq -r '.workers[]' | while read -r worker; do
+  node_id=$(echo "$worker" | jq -r '.node_id')
+  heartbeat=$(echo "$worker" | jq -r '.heartbeat_at')
+  heartbeat_ts=$(date -d "$heartbeat" +%s 2>/dev/null || echo 0)
+  now_ts=$(date +%s)
+  age=$((now_ts - heartbeat_ts))
+
+  if [ $age -gt $THRESHOLD_SECONDS ]; then
+    echo "❌ $node_id: heartbeat $age seconds old (threshold: $THRESHOLD_SECONDS)"
+    EXIT_CODE=1
+  else
+    echo "✓ $node_id: healthy ($age seconds ago)"
+  fi
+done
+
+exit $EXIT_CODE
+```
+
+### Deployment Verification
+
+```bash
+#!/bin/bash
+# verify-deployment.sh - Ensure all workers on expected version
+
+EXPECTED_VERSION="v0.0.22-15-g8b065bde"
+EXIT_CODE=0
+
+echo "Verifying deployment: $EXPECTED_VERSION"
+
+ampctl worker list --json | jq -r '.workers[].node_id' | while read worker; do
+  version=$(ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '.info.version')
+
+  if [ "$version" = "$EXPECTED_VERSION" ]; then
+    echo "✓ $worker: $version"
+  else
+    echo "❌ $worker: $version (expected: $EXPECTED_VERSION)"
+    EXIT_CODE=1
+  fi
+done
+
+exit $EXIT_CODE
+```
+
+### Alert on Inactive Workers
+
+```bash
+#!/bin/bash
+# alert-inactive-workers.sh
+
+THRESHOLD_SECONDS=30
+
+ampctl worker list --json | jq -r '.workers[] |
+  select((.heartbeat_at | fromdateiso8601) < (now - '$THRESHOLD_SECONDS')) |
+  "ALERT: Worker \(.node_id) inactive since \(.heartbeat_at)"'
+
+# Run in cron or monitoring system
+```
+
+### Worker Inventory Export
+
+```bash
+# Generate CSV report of all workers
+echo "node_id,version,commit_sha,created_at,registered_at,heartbeat_at" > workers-inventory.csv
+
+ampctl worker list --json | jq -r '.workers[].node_id' | while read worker; do
+  ampctl worker inspect "$worker" --json 2>/dev/null | jq -r '
+    [.node_id, .info.version, .info.commit_sha, .created_at, .registered_at, .heartbeat_at] |
+    @csv'
+done >> workers-inventory.csv
+
+echo "Inventory saved to workers-inventory.csv"
+```
+
+## API Reference
+
+Worker management endpoints:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/workers` | GET | List all workers |
+| `/workers/{id}` | GET | Get worker details by node ID |
+
+<Note>
+For complete API schemas, see the [Admin API OpenAPI specification](/api/admin/overview).
+</Note>
+
+## Architecture
+
+Worker health monitoring flow:
+
+```
+Worker → Heartbeat (1s) → Metadata DB ← Admin API ← ampctl/client
+                                ↓
+                      Advisory Lock (prevents duplicates)
+```
+
+**Components:**
+- **Worker** - Sends heartbeats every 1 second
+- **Metadata DB** - Stores worker state and heartbeat timestamps
+- **Advisory Lock** - PostgreSQL lock preventing duplicate node IDs
+- **Admin API** - Exposes worker information via HTTP
+- **ampctl** - CLI for querying worker status
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Job Management" icon="play" href="/admin/jobs">
+    Monitor jobs executed by workers
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/admin/monitoring">
+    Set up worker health monitoring
+  </Card>
+</CardGroup>

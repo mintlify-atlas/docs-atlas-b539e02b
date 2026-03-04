@@ -1,0 +1,131 @@
+---
+title: "Querying Data Overview"
+description: "Query blockchain data using SQL through Arrow Flight or JSON Lines interfaces"
+---
+
+Amp provides powerful SQL querying capabilities for blockchain data through two complementary interfaces: Arrow Flight (gRPC) and JSON Lines (HTTP). Both interfaces support the full DataFusion SQL engine, enabling complex queries across blockchain datasets.
+
+## Query Interfaces
+
+Amp exposes two query endpoints, each optimized for different use cases:
+
+<CardGroup cols={2}>
+  <Card title="Arrow Flight" icon="bolt" href="/querying/arrow-flight">
+    High-performance gRPC interface for batch and streaming queries
+    
+    **Port:** 1602  
+    **Protocol:** gRPC  
+    **Format:** Apache Arrow columnar data  
+    **Streaming:** Yes
+  </Card>
+  
+  <Card title="JSON Lines" icon="code" href="/querying/json-lines">
+    Simple HTTP interface for ad-hoc queries and integrations
+    
+    **Port:** 1603  
+    **Protocol:** HTTP  
+    **Format:** Newline-delimited JSON  
+    **Streaming:** No
+  </Card>
+</CardGroup>
+
+## When to Use Each Interface
+
+### Use Arrow Flight When:
+
+- **High performance is critical** - Columnar format and gRPC provide maximum throughput
+- **Streaming data is needed** - Real-time updates as new blocks arrive
+- **You have Arrow-compatible tools** - Python (pyarrow), Rust, or other Arrow ecosystem tools
+- **Large result sets** - Efficient streaming prevents memory issues
+
+### Use JSON Lines When:
+
+- **Simplicity is preferred** - Standard HTTP POST with curl or any HTTP client
+- **Batch queries only** - One-time queries that don't need streaming
+- **JSON output required** - Easy integration with JSON-based systems
+- **Quick prototyping** - Fastest way to explore data interactively
+
+## SQL Query Support
+
+Both interfaces use Apache DataFusion as the SQL engine, providing:
+
+- **Standard SQL syntax** - SELECT, WHERE, JOIN, GROUP BY, ORDER BY, and more
+- **Blockchain-specific functions** - EVM decoding, hex conversion, unit shifting
+- **Namespace/table syntax** - Query datasets with `namespace/dataset.table`
+- **User-defined functions (UDFs)** - Custom functions for blockchain data processing
+
+See [SQL Basics](/querying/sql-basics) for detailed syntax and examples.
+
+## Default Server Ports
+
+When you start `ampd server`, both endpoints are available by default:
+
+```bash
+ampd server
+# Arrow Flight: localhost:1602
+# JSON Lines:   localhost:1603
+```
+
+You can configure these ports in `.amp/config.toml`:
+
+```toml
+flight_addr = "0.0.0.0:1602"
+jsonl_addr = "0.0.0.0:1603"
+```
+
+Or selectively enable specific endpoints:
+
+```bash
+# Start only Arrow Flight endpoint
+ampd server --flight-server
+
+# Start only JSON Lines endpoint
+ampd server --jsonl-server
+```
+
+## Quick Start Examples
+
+### Arrow Flight (Python)
+
+```python
+import pyarrow.flight as flight
+
+client = flight.connect("grpc://localhost:1602")
+
+info = client.get_flight_info(
+    flight.FlightDescriptor.for_command(
+        b"SELECT * FROM eth_rpc.blocks LIMIT 10"
+    )
+)
+
+reader = client.do_get(info.endpoints[0].ticket)
+table = reader.read_all()
+print(table.to_pandas())
+```
+
+### JSON Lines (curl)
+
+```bash
+curl -X POST http://localhost:1603 \
+  --data "SELECT * FROM eth_rpc.blocks LIMIT 10"
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SQL Basics" icon="database" href="/querying/sql-basics">
+    Learn SQL syntax, namespace/table patterns, and common queries
+  </Card>
+  
+  <Card title="Arrow Flight" icon="bolt" href="/querying/arrow-flight">
+    Connect with Python, Rust, or other gRPC clients
+  </Card>
+  
+  <Card title="JSON Lines" icon="code" href="/querying/json-lines">
+    Query via HTTP with curl or any HTTP client
+  </Card>
+  
+  <Card title="Streaming" icon="wave" href="/querying/streaming">
+    Set up real-time streaming queries
+  </Card>
+</CardGroup>

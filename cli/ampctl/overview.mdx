@@ -1,0 +1,124 @@
+---
+title: ampctl Overview
+description: Administration CLI for managing Amp infrastructure
+---
+
+## What is ampctl?
+
+ampctl is the administration CLI for Amp engine operators. It provides a comprehensive command-line interface for managing all aspects of Amp infrastructure through the Admin API. This is the operator's swiss-army knife for Amp administration.
+
+## Administrative CLI Tool
+
+ampctl is designed for DevOps engineers and administrators who need to:
+
+- Manage dataset lifecycles (register, deploy, list)
+- Control extraction jobs (monitor, stop, delete)
+- Monitor worker nodes and check health status
+- Manage blockchain data providers
+- Query storage locations and file metadata
+- Validate SQL queries and schemas
+
+## Connection to Admin API
+
+ampctl communicates with the Amp controller's Admin API on port 1610:
+
+```
+ampctl → Admin API (port 1610) → Controller
+```
+
+### Configuration
+
+The Admin API URL can be configured in three ways:
+
+**Default behavior:**
+```bash
+# Uses default: http://localhost:1610
+ampctl worker list
+```
+
+**Via command-line flag:**
+```bash
+# Connect to production controller
+ampctl --admin-url http://production:1610 worker list
+
+# Connect to custom port
+ampctl --admin-url http://localhost:8080 datasets list
+```
+
+**Via environment variable:**
+```bash
+# Set for all commands in session
+export AMP_ADMIN_URL="http://production:1610"
+ampctl worker list
+ampctl datasets list
+```
+
+**Configuration precedence:**
+1. `--admin-url` flag (highest priority)
+2. `AMP_ADMIN_URL` environment variable
+3. Default: `http://localhost:1610`
+
+## Common Flags
+
+All ampctl commands support these global flags:
+
+<ParamField path="--admin-url" type="string" default="http://localhost:1610">
+  Admin API URL. Can also be set via `AMP_ADMIN_URL` environment variable.
+</ParamField>
+
+<ParamField path="--auth-token" type="string">
+  Bearer authentication token for secured Admin API endpoints. Can also be set via `AMP_AUTH_TOKEN` environment variable.
+</ParamField>
+
+<ParamField path="--json" type="boolean" default="false">
+  Output results in JSON format for scripting and automation.
+</ParamField>
+
+### Authentication
+
+Optional authentication token for secured Admin API endpoints:
+
+```bash
+# Via flag
+ampctl --auth-token <token> worker list
+
+# Via environment variable
+export AMP_AUTH_TOKEN="<token>"
+ampctl worker list
+```
+
+### JSON Output
+
+All commands support JSON output for scripting and automation:
+
+```bash
+# Human-readable output (default)
+ampctl dataset list
+
+# JSON output
+ampctl dataset list --json
+```
+
+## Command Groups
+
+ampctl provides the following command groups:
+
+- **[datasets](/cli/ampctl/datasets)** - Dataset lifecycle management (register, deploy, list)
+- **[jobs](/cli/ampctl/jobs)** - Job control and monitoring (list, stop, progress)
+- **[workers](/cli/ampctl/workers)** - Worker node monitoring (list, inspect, health)
+- **[providers](/cli/ampctl/providers)** - Provider configuration (register, list, delete)
+
+## Getting Help
+
+View all available commands:
+
+```bash
+ampctl --help
+```
+
+View help for a specific command:
+
+```bash
+ampctl datasets --help
+ampctl jobs list --help
+```

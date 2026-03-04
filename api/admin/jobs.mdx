@@ -1,0 +1,315 @@
+---
+title: Job Endpoints
+description: Control and monitor data extraction jobs
+---
+
+Job endpoints allow you to trigger, monitor, and manage data extraction jobs in Amp. Jobs are the runtime execution units that process blockchain data according to dataset configurations.
+
+## List Jobs
+
+<api method="GET" endpoint="/jobs" />
+
+Retrieves a paginated list of jobs from the metadata database.
+
+### Query Parameters
+
+<ParamField query="limit" type="integer">
+  Maximum number of jobs to return (default: 50, max: 1000)
+</ParamField>
+
+<ParamField query="last_job_id" type="string">
+  ID of the last job from the previous page for cursor-based pagination
+</ParamField>
+
+<ParamField query="status" type="string">
+  Status filter:
+  - `active` (default): Non-terminal jobs only
+  - `all`: All jobs
+  - Comma-separated values: e.g., `scheduled,running`
+</ParamField>
+
+### Response
+
+<ResponseField name="jobs" type="array" required>
+  List of jobs
+  
+  <Expandable title="Job Info">
+    <ResponseField name="id" type="integer" required>
+      Unique job identifier (64-bit integer)
+    </ResponseField>
+    <ResponseField name="created_at" type="string" required>
+      Job creation timestamp (ISO 8601 / RFC 3339)
+    </ResponseField>
+    <ResponseField name="updated_at" type="string" required>
+      Job last update timestamp (ISO 8601 / RFC 3339)
+    </ResponseField>
+    <ResponseField name="node_id" type="string" required>
+      ID of the worker node this job is scheduled for
+    </ResponseField>
+    <ResponseField name="status" type="string" required>
+      Current status: Scheduled, Running, Completed, Stopped, Failed, etc.
+    </ResponseField>
+    <ResponseField name="descriptor" type="object" required>
+      Job descriptor containing job-specific parameters as JSON
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="next_cursor" type="integer">
+  Cursor for the next page (null if no more results)
+</ResponseField>
+
+### Example Request
+
+```bash
+curl "http://localhost:1610/jobs?limit=10&status=active"
+```
+
+### Example Response
+
+```json
+{
+  "jobs": [
+    {
+      "id": 12345,
+      "created_at": "2025-01-15T14:30:00.123456Z",
+      "updated_at": "2025-01-15T17:20:15.456789Z",
+      "node_id": "worker-01h2xcejqtf2nbrexx3vqjhp41",
+      "status": "Running",
+      "descriptor": {
+        "dataset": "eth/blocks@1.0.0",
+        "start_block": 0,
+        "end_block": null
+      }
+    }
+  ],
+  "next_cursor": 12346
+}
+```
+
+## Get Job Details
+
+<api method="GET" endpoint="/jobs/{id}" />
+
+Retrieves detailed information for a specific job by its ID.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the job to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer" required>
+  Unique job identifier
+</ResponseField>
+
+<ResponseField name="created_at" type="string" required>
+  Job creation timestamp (ISO 8601 / RFC 3339)
+</ResponseField>
+
+<ResponseField name="updated_at" type="string" required>
+  Job last update timestamp (ISO 8601 / RFC 3339)
+</ResponseField>
+
+<ResponseField name="node_id" type="string" required>
+  Worker node ID this job is scheduled for
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  Current job status
+</ResponseField>
+
+<ResponseField name="descriptor" type="object" required>
+  Job descriptor with job-specific parameters
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:1610/jobs/12345
+```
+
+### Response Codes
+
+- **200 OK** - Job information retrieved successfully
+- **400 Bad Request** - Invalid job ID format
+- **404 Not Found** - Job not found
+- **500 Internal Server Error** - Database error
+
+## Get Job Progress
+
+<api method="GET" endpoint="/jobs/{id}/progress" />
+
+Retrieves progress information for all tables written by a specific job, including current block numbers, file counts, and size statistics.
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  The unique identifier of the job
+</ParamField>
+
+### Response
+
+<ResponseField name="job_id" type="integer" required>
+  Job ID
+</ResponseField>
+
+<ResponseField name="job_status" type="string" required>
+  Current job status
+</ResponseField>
+
+<ResponseField name="tables" type="object" required>
+  Progress for each table written by this job, keyed by table name
+  
+  <Expandable title="Table Progress">
+    <ResponseField name="files_count" type="integer" required>
+      Number of Parquet files written for this table
+    </ResponseField>
+    <ResponseField name="total_size_bytes" type="integer" required>
+      Total size of all Parquet files in bytes
+    </ResponseField>
+    <ResponseField name="start_block" type="integer">
+      Lowest block number that has been synced (null if no data yet)
+    </ResponseField>
+    <ResponseField name="current_block" type="integer">
+      Highest block number that has been synced (null if no data yet)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:1610/jobs/12345/progress
+```
+
+### Example Response
+
+```json
+{
+  "job_id": 12345,
+  "job_status": "Running",
+  "tables": {
+    "blocks": {
+      "files_count": 150,
+      "total_size_bytes": 5368709120,
+      "start_block": 0,
+      "current_block": 15000000
+    },
+    "transactions": {
+      "files_count": 280,
+      "total_size_bytes": 12884901888,
+      "start_block": 0,
+      "current_block": 15000000
+    }
+  }
+}
+```
+
+## Stop Job
+
+<api method="PUT" endpoint="/jobs/{id}/stop" />
+
+Stops a running job gracefully. This is an idempotent operation - stopping an already stopped job returns success.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  The unique identifier of the job to stop
+</ParamField>
+
+### Response Codes
+
+- **200 OK** - Job stop request processed successfully
+- **400 Bad Request** - Invalid job ID format
+- **404 Not Found** - Job not found
+- **500 Internal Server Error** - Database error
+
+### State Transitions
+
+Valid stop transitions:
+- **Scheduled → StopRequested** (200 OK)
+- **Running → StopRequested** (200 OK)
+
+Already terminal (idempotent - returns success):
+- **Stopped → no change** (200 OK)
+- **Completed → no change** (200 OK)
+- **Failed → no change** (200 OK)
+
+### Example Request
+
+```bash
+curl -X PUT http://localhost:1610/jobs/12345/stop
+```
+
+## Delete Job
+
+<api method="DELETE" endpoint="/jobs/{id}" />
+
+Deletes a job by its ID if it's in a terminal state (Completed, Stopped, or Failed). This is a safe, idempotent operation.
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  The unique identifier of the job to delete
+</ParamField>
+
+### Response Codes
+
+- **204 No Content** - Job deleted successfully or doesn't exist
+- **400 Bad Request** - Invalid job ID format
+- **409 Conflict** - Job exists but is not in a terminal state
+- **500 Internal Server Error** - Database error
+
+### Terminal States
+
+Jobs can only be deleted when in these states:
+- **Completed** - Safe to delete
+- **Stopped** - Safe to delete
+- **Failed** - Safe to delete
+
+Protected states (cannot be deleted):
+- **Scheduled** - Job is waiting to run
+- **Running** - Job is actively executing
+- **StopRequested** - Job is being stopped
+- **Stopping** - Job is in process of stopping
+
+### Example Request
+
+```bash
+curl -X DELETE http://localhost:1610/jobs/12345
+```
+
+## Bulk Delete Jobs
+
+<api method="DELETE" endpoint="/jobs" />
+
+Deletes multiple jobs based on status filter. Only jobs in terminal states are deleted.
+
+### Query Parameters
+
+<ParamField query="status" type="string" required>
+  Status filter for jobs to delete:
+  - `terminal`: All terminal state jobs
+  - `completed`: All completed jobs
+  - `stopped`: All stopped jobs
+  - `error`: All failed jobs
+</ParamField>
+
+### Response Codes
+
+- **204 No Content** - Operation completed successfully
+- **400 Bad Request** - Invalid or missing status parameter
+- **500 Internal Server Error** - Database error
+
+### Example Request
+
+```bash
+curl -X DELETE "http://localhost:1610/jobs?status=completed"
+```
+
+<Note>
+  Non-terminal jobs are completely protected from deletion. The database ensures atomic bulk deletion.
+</Note>

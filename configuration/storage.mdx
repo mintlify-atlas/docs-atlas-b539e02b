@@ -1,0 +1,375 @@
+---
+title: Storage Configuration
+description: Configure object storage backends for Amp datasets
+---
+
+## Overview
+
+Amp stores dataset parquet files in object storage, supporting local filesystems, S3-compatible stores, Google Cloud Storage (GCS), and Azure Blob Storage. All directory configurations (`data_dir`, `manifests_dir`, `providers_dir`) support both filesystem paths and object store URLs.
+
+## Storage Backends
+
+Amp supports the following storage backends:
+
+- **Local Filesystem**: For development and single-node deployments
+- **Amazon S3**: AWS S3 and S3-compatible stores (MinIO, DigitalOcean Spaces, etc.)
+- **Google Cloud Storage (GCS)**: Google Cloud Storage buckets
+- **Azure Blob Storage**: Azure Blob Storage containers
+
+## Configuration
+
+### Local Filesystem
+
+Use absolute or relative filesystem paths:
+
+```toml
+data_dir = "/var/amp/data"
+manifests_dir = "./manifests"
+providers_dir = "./providers"
+```
+
+**When to use:**
+
+- Local development and testing
+- Single-node deployments with local storage
+- Fast iteration during development
+
+**Limitations:**
+
+- Not suitable for distributed deployments
+- No built-in replication or durability guarantees
+- Limited by local disk capacity
+
+### S3-Compatible Storage
+
+Use S3 URLs for AWS S3 or S3-compatible object stores:
+
+```toml
+data_dir = "s3://my-bucket/amp/data"
+manifests_dir = "s3://my-bucket/amp/manifests"
+providers_dir = "s3://my-bucket/amp/providers"
+```
+
+**URL format**: `s3://<bucket>/<optional-prefix>`
+
+**Authentication**: Configure via environment variables:
+
+```bash
+# AWS credentials
+export AWS_ACCESS_KEY_ID="your-access-key-id"
+export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# Optional: Custom endpoint for S3-compatible stores
+export AWS_ENDPOINT="https://s3.example.com"
+
+# Optional: Session token for temporary credentials
+export AWS_SESSION_TOKEN="your-session-token"
+
+# Optional: Allow non-TLS connections (not recommended for production)
+export AWS_ALLOW_HTTP="true"
+```
+
+**S3-Compatible Stores**:
+
+- **AWS S3**: Use default AWS endpoints
+- **MinIO**: Set `AWS_ENDPOINT` to your MinIO server
+- **DigitalOcean Spaces**: Set `AWS_ENDPOINT` to `https://<region>.digitaloceanspaces.com`
+- **Cloudflare R2**: Set `AWS_ENDPOINT` to your R2 endpoint
+- **Wasabi**: Set `AWS_ENDPOINT` to `https://s3.<region>.wasabisys.com`
+
+### Google Cloud Storage (GCS)
+
+Use GCS URLs for Google Cloud Storage:
+
+```toml
+data_dir = "gs://my-bucket/amp/data"
+manifests_dir = "gs://my-bucket/amp/manifests"
+providers_dir = "gs://my-bucket/amp/providers"
+```
+
+**URL format**: `gs://<bucket>/<optional-prefix>`
+
+**Authentication**: Configure via environment variables:
+
+```bash
+# Option 1: Service account file path
+export GOOGLE_SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
+
+# Option 2: Service account key (JSON string)
+export GOOGLE_SERVICE_ACCOUNT_KEY='{"type":"service_account",...}'
+
+# Option 3: Application Default Credentials (ADC)
+# No environment variable needed - uses gcloud auth or Compute Engine metadata
+```
+
+**Service account permissions**:
+
+- `storage.objects.create`
+- `storage.objects.delete`
+- `storage.objects.get`
+- `storage.objects.list`
+
+### Azure Blob Storage
+
+Use Azure URLs for Azure Blob Storage:
+
+```toml
+data_dir = "az://my-container/amp/data"
+manifests_dir = "az://my-container/amp/manifests"
+providers_dir = "az://my-container/amp/providers"
+```
+
+**URL format**: `az://<container>/<optional-prefix>`
+
+**Authentication**: Configure via environment variables:
+
+```bash
+# Account name and key
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+export AZURE_STORAGE_ACCOUNT_KEY="account-key"
+
+# Or use connection string
+export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;..."
+```
+
+## Data Directory Structure
+
+The `data_dir` contains extracted parquet files organized by dataset, table, and revision:
+
+```
+data_dir/
+├── namespace_name/              # Dataset (namespace/name)
+│   ├── blocks/                  # Table name
+│   │   ├── 01930eaf-7b5e-.../  # Revision ID (UUIDv7)
+│   │   │   ├── 000000000-a1b2c3d4e5f67890.parquet
+│   │   │   ├── 000001000-b2c3d4e5f6789a01.parquet
+│   │   │   └── ...
+│   │   └── 01930eb0-8c9d-.../  # Another revision
+│   ├── transactions/
+│   │   └── 01930eaf-7b5e-.../
+│   └── logs/
+│       └── 01930eaf-7b5e-.../
+└── another_dataset/
+```
+
+### Path Components
+
+- **Dataset directory**: `namespace_name` (e.g., `my_org_eth_mainnet` for `my_org/eth_mainnet`)
+- **Table directory**: Table name (e.g., `blocks`, `transactions`, `logs`)
+- **Revision directory**: UUIDv7 revision ID (e.g., `01930eaf-67e5-7b5e-80b0-8d3f2a5c4e1b`)
+- **Parquet files**: Named `{block_num:09}-{suffix:016x}.parquet`
+
+### Revision Management
+
+Each revision is immutable and contains a snapshot of table data:
+
+- **Active revision**: Currently queryable revision (tracked in metadata database)
+- **Inactive revisions**: Previous snapshots (retained for potential recovery)
+- **Revision IDs**: UUIDv7 format provides temporal ordering
+
+## Parquet File Management
+
+Amp writes data as parquet files with the following characteristics:
+
+### File Naming
+
+Files are named with the starting block number and a random suffix:
+
+```
+000000000-a1b2c3d4e5f67890.parquet
+│         │
+│         └─ Random 16-char hex suffix (for uniqueness)
+└─ Starting block number (9 digits, zero-padded)
+```
+
+### File Size Targets
+
+Configure target file sizes in the `[writer]` section:
+
+```toml
+[writer]
+# Target 2GB per file (default)
+bytes = 2147483648
+
+# Or target specific row count
+rows = 1000000
+
+# Overflow multiplier for flexibility
+overflow = "1.5"  # Allow files up to 1.5x target size
+```
+
+### Compression
+
+Parquet files support multiple compression algorithms:
+
+```toml
+[writer]
+compression = "zstd(1)"  # Default: zstd with level 1
+```
+
+**Available algorithms**:
+
+- `zstd(level)`: Zstandard (levels 1-22, default 1)
+- `lz4`: LZ4 (fast compression)
+- `gzip`: Gzip (slower, better compression)
+- `brotli(level)`: Brotli (levels 1-11)
+- `snappy`: Snappy (fast compression)
+- `uncompressed`: No compression
+
+**Compression tradeoffs**:
+
+- **zstd(1)**: Best balance of speed and compression ratio (recommended)
+- **lz4**: Fastest compression, lower ratio
+- **zstd(3)** or **gzip**: Better compression, slower writes
+- **uncompressed**: Fastest writes, largest files
+
+### Bloom Filters
+
+Enable bloom filters for faster point lookups:
+
+```toml
+[writer]
+bloom_filters = true  # Default: false
+```
+
+Bloom filters improve query performance for equality filters (`WHERE column = value`) but increase file size.
+
+### Metadata Cache
+
+Configure parquet metadata caching:
+
+```toml
+[writer]
+cache_size_mb = 1024  # Default: 1GB
+```
+
+The metadata cache stores parsed parquet footers in memory, avoiding repeated reads from object storage during query planning.
+
+## File Compaction
+
+The compactor merges small files into larger ones to improve query performance:
+
+```toml
+[writer.compactor]
+active = true                # Enable compactor (default: false)
+metadata_concurrency = 2     # Concurrent metadata operations
+write_concurrency = 2        # Concurrent compaction writes
+min_interval = 1.0           # Run every 1 second
+cooldown_duration = 1024.0   # Base cooldown in seconds
+overflow = "1"               # Eager compaction overflow
+bytes = 0                    # Eager compaction threshold (0 = use target size)
+rows = 0                     # Eager compaction row threshold
+```
+
+**How it works**:
+
+1. Scans for small files below target size
+2. Groups files by block range
+3. Merges files into larger parquet files
+4. Marks old files for deletion
+5. Updates metadata database
+
+## Garbage Collection
+
+The garbage collector removes obsolete files:
+
+```toml
+[writer.collector]
+active = true                    # Enable collector (default: false)
+min_interval = 30.0              # Run every 30 seconds
+deletion_lock_duration = 1800.0  # Hold lock for 30 minutes
+```
+
+**Deletion process**:
+
+1. Identifies files marked for deletion (expired files)
+2. Waits for deletion lock duration to ensure no queries are using them
+3. Deletes files from object storage
+4. Removes metadata entries from database
+
+<Warning>
+Only enable garbage collection after compaction is working correctly. Deleted files cannot be recovered.
+</Warning>
+
+## Mixed Storage Backends
+
+You can use different storage backends for different directories:
+
+```toml
+# Data in S3
+data_dir = "s3://prod-bucket/data"
+
+# Manifests in GCS
+manifests_dir = "gs://config-bucket/manifests"
+
+# Providers on local filesystem
+providers_dir = "./providers"
+```
+
+This is useful for:
+
+- **Cost optimization**: Store large datasets in cheaper object storage
+- **Performance**: Keep frequently accessed configs on local storage
+- **Security**: Separate sensitive configs from public datasets
+
+## Best Practices
+
+### Production Deployments
+
+1. **Use object storage**: S3, GCS, or Azure for distributed deployments
+2. **Enable versioning**: Object store versioning for disaster recovery
+3. **Configure lifecycle policies**: Automatically archive or delete old revisions
+4. **Monitor storage costs**: Track storage growth and optimize compression
+5. **Test disaster recovery**: Verify backup and restore procedures
+
+### Performance Optimization
+
+1. **Choose appropriate compression**: Balance speed and storage costs
+2. **Enable compaction**: Reduce small file overhead
+3. **Configure metadata cache**: Size cache based on dataset count and memory
+4. **Use regional endpoints**: Minimize latency to object storage
+5. **Monitor file counts**: Too many small files slow down queries
+
+### Security
+
+1. **Use IAM roles**: Avoid hardcoded credentials (use instance profiles, workload identity)
+2. **Encrypt at rest**: Enable object storage encryption
+3. **Encrypt in transit**: Use HTTPS endpoints
+4. **Restrict bucket access**: Use bucket policies and VPC endpoints
+5. **Rotate credentials**: Regular credential rotation for access keys
+
+## Troubleshooting
+
+### Connection Errors
+
+**S3 errors**: Check `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`
+
+**GCS errors**: Verify service account credentials and permissions
+
+**Azure errors**: Confirm storage account name and key
+
+### Permission Errors
+
+Ensure the service account or IAM role has:
+
+- **Read**: List objects, get objects
+- **Write**: Put objects, delete objects
+- **List**: List buckets/containers
+
+### Performance Issues
+
+- **Slow queries**: Check metadata cache size, enable compaction
+- **High latency**: Use regional endpoints closer to compute
+- **Many small files**: Enable compaction to merge files
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Metadata Database" icon="database" href="/configuration/metadata-database">
+    Configure PostgreSQL for metadata
+  </Card>
+  <Card title="Telemetry" icon="chart-line" href="/configuration/telemetry">
+    Set up metrics and monitoring
+  </Card>
+</CardGroup>
