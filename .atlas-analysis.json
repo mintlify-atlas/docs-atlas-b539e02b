@@ -1,0 +1,161 @@
+{
+  "projectType": "data-platform",
+  "projectName": "Amp",
+  "projectDescription": "A blockchain-native database for extracting, transforming, and querying blockchain data at scale.",
+  "theme": "aspen",
+  "primaryColor": "#8245fc",
+  "lightColor": "#c499fc",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/data-flow",
+              "concepts/datasets",
+              "concepts/providers"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/metadata-database",
+              "configuration/storage",
+              "configuration/telemetry"
+            ]
+          },
+          {
+            "group": "Querying Data",
+            "pages": [
+              "querying/overview",
+              "querying/sql-basics",
+              "querying/arrow-flight",
+              "querying/json-lines",
+              "querying/streaming"
+            ]
+          },
+          {
+            "group": "Data Sources",
+            "pages": [
+              "sources/overview",
+              "sources/evm-rpc",
+              "sources/firehose",
+              "sources/solana"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/overview",
+              "admin/datasets",
+              "admin/jobs",
+              "admin/workers",
+              "admin/monitoring"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/modes",
+              "deployment/solo-mode",
+              "deployment/distributed-mode",
+              "deployment/production"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "ampd",
+            "pages": [
+              "cli/ampd/overview",
+              "cli/ampd/server",
+              "cli/ampd/worker",
+              "cli/ampd/controller",
+              "cli/ampd/solo",
+              "cli/ampd/migrate"
+            ]
+          },
+          {
+            "group": "ampctl",
+            "pages": [
+              "cli/ampctl/overview",
+              "cli/ampctl/datasets",
+              "cli/ampctl/jobs",
+              "cli/ampctl/workers",
+              "cli/ampctl/providers"
+            ]
+          },
+          {
+            "group": "ampup",
+            "pages": [
+              "cli/ampup/overview",
+              "cli/ampup/install",
+              "cli/ampup/manage"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Admin API",
+            "pages": [
+              "api/admin/overview",
+              "api/admin/datasets",
+              "api/admin/jobs",
+              "api/admin/workers",
+              "api/admin/providers"
+            ]
+          },
+          {
+            "group": "Query API",
+            "pages": [
+              "api/query/flight-protocol",
+              "api/query/jsonl-protocol"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "SQL query engine powered by Apache DataFusion",
+    "Multiple blockchain data extractors (EVM RPC, Firehose, Solana)",
+    "High-performance Arrow Flight and JSON Lines query interfaces",
+    "Distributed worker architecture for scalable data ingestion",
+    "Parquet-based columnar storage optimized for analytics",
+    "Real-time streaming query support",
+    "Comprehensive admin API for dataset and job management",
+    "Built-in telemetry and monitoring with OpenTelemetry"
+  ],
+  "publicApiSurface": [
+    "ampd server - Query server with Arrow Flight (port 1602) and JSON Lines (port 1603)",
+    "ampd worker - Distributed worker for data extraction",
+    "ampd controller - Admin API server (port 1610)",
+    "ampd solo - Development mode with all components",
+    "ampctl datasets - Dataset management commands",
+    "ampctl jobs - Job control commands",
+    "ampctl workers - Worker monitoring commands",
+    "ampup - Version manager for ampd installation",
+    "Admin API REST endpoints - /datasets, /jobs, /workers, /providers",
+    "Arrow Flight DoGet - Execute SQL queries via gRPC",
+    "JSON Lines POST /query/jsonl - Execute SQL queries via HTTP"
+  ]
+}
